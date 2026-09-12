@@ -19,6 +19,7 @@ mkdirSync(join(dir,'demo'),{recursive:true});copyFileSync(join(root,'demo/README
 mkdirSync(join(dir,'deploy'),{recursive:true});copyFileSync(join(root,'deploy/permissions.conf'),join(dir,'deploy/permissions.conf'));
 writeFileSync(join(dir,'QUICKSTART.txt'),`Natsui ${version} (${host})\n\nRun ${binary==='natsui.exe'?'.\\natsui.exe':'./natsui'} --demo for the local simulation.\nOpen http://127.0.0.1:4321 in a browser.\n\nFor real data, set NATSUI_URL and NATSUI_PROFILE and run without --demo.\nSee README.md and SECURITY.md for credentials and access boundaries.\nDocker and source-build commands in README.md require a source checkout.\n`);
 const archive=join(out,name+'.tar.gz');
-execFileSync('tar',['-czf',archive,'-C',out,name]);
+// Relative archive paths avoid GNU tar interpreting Windows drive letters as remote hosts.
+execFileSync('tar',['-czf',name+'.tar.gz',name],{cwd:out});
 writeFileSync(archive+'.sha256',createHash('sha256').update(readFileSync(archive)).digest('hex')+'  '+name+'.tar.gz\n');
 console.log(archive);
