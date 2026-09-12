@@ -1,6 +1,6 @@
 # Configuration and operations
 
-A local, read-only NATS and JetStream observability dashboard with inspectable history, consumer diagnostics and incident investigation. Rust serves the bundled interface; SQLite stores local settings and operational history. No Node runtime or external database is needed to run the native binary.
+A local NATS and JetStream observability dashboard with read-only access by default with inspectable history, consumer diagnostics and incident investigation. Rust serves the bundled interface; SQLite stores local settings and operational history. No Node runtime or external database is needed to run the native binary.
 
 The local beta has no shared login or public HTTP access policy. Production NATS connections require a restricted NATS identity. The dashboard never pulls or acknowledges application messages.
 
@@ -137,3 +137,9 @@ docker build --target verification -t natsui:verified .
 - [Initial assessment](../ASSESSMENT.md)
 
 Design inspired by [Fibril](https://github.com/Axmouth/fibril). Theme styles are adapted from its admin interface. MIT attribution is preserved in LICENSE. Natsui is an independent project.
+
+## Reviewed JetStream settings
+
+`NATSUI_ALLOW_WRITES=1` enables the JetStream configuration section in Settings for the current connection. The default is `0`; only the dashboard needs restarting to enable this capability. Applying supported resource edits does not require a NATS restart. NATS 2.11+ in the 2.x series and native update permissions are required. The standard read-only permission template remains valid for inspection.
+
+Settings loads a fresh resource configuration, previews changed fields, and verifies an applied update with a native INFO read. Activity retains the attempted change and outcome. Retention reductions can delete records immediately. Shared authentication and server-file editing are separate capabilities. See [editor details](../SETTINGS_AND_ACCESS.md#implemented-jetstream-editor) and [write permissions](../SECURITY.md#optional-local-configuration-editing).

@@ -39,4 +39,4 @@ NATS Server 2.11.8 is a compatibility test baseline, not a claim that it is the 
 
 ## Deferred beyond the local beta
 
-Shared login, roles, public HTTP exposure, resource mutations, broker configuration editing and restart supervision remain separate capabilities. They do not block a restricted local read-only release.
+Shared login, roles, public HTTP exposure, resource creation/deletion, server configuration editing and restart supervision remain separate capabilities. Native stream and consumer configuration editing is opt-in for local operator use; default connections remain read-only.

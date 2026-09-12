@@ -99,6 +99,7 @@ function renderAttention(){
 }
 function render(){
  const s=data.snapshot,summary=data.summary;
+ $('footer-scope').textContent=data.dashboard?.writes_enabled?'Local workspace / reviewed broker edits enabled':'Local workspace / read-only broker access';
  let health=$('storage-health');if(!health){health=element('div',null,'issue');health.id='storage-health';health.setAttribute('role','status');$('collection-issues').before(health);}
  const storage=data.dashboard?.storage;health.hidden=!storage||storage.status==='ok';
  if(!health.hidden){const failed=Object.entries(storage.operations||{}).filter(([,v])=>v.status==='failed').map(([k])=>k.replaceAll('_',' ')).join(', ');health.textContent=`Dashboard storage needs attention${failed?': '+failed:''}. History or incidents may not be saved. The last known settings remain in use. Check disk space and directory access.`;}
@@ -106,7 +107,7 @@ function render(){
  $('scenario-panel').hidden=!s.scenario;
  if(s.scenario){$('scenario-phase').textContent=s.scenario.phase;$('scenario-description').textContent=s.scenario.description;$('scenario-time').textContent=`${s.scenario.second}s / ${s.scenario.duration}s`;$('scenario-progress').value=s.scenario.second;$('scenario-source').textContent=s.demo?'SIMULATED SCENARIO':'LIVE WORKLOAD';}
  $('scenario-pause').hidden=!staticDemo;$('scenario-reset').hidden=!staticDemo;
- $('profile').textContent=s.scope;$('demo-banner').hidden=!s.demo;$('mode').textContent=s.demo?'Simulation':s.status==='complete'?'Live / read-only':s.status;$('mode').className=`badge ${s.demo?'demo':s.status==='complete'?'good':'warn'}`;
+ $('profile').textContent=s.scope;$('demo-banner').hidden=!s.demo;$('mode').textContent=s.demo?'Simulation':s.status==='complete'?(data.dashboard?.writes_enabled?'Live / edits enabled':'Live / read-only'):s.status;$('mode').className=`badge ${s.demo?'demo':s.status==='complete'?'good':'warn'}`;
  $('largest').textContent=summary.largest?number(summary.largest.pending):s.status==='unavailable'?'--':'0';$('largest-name').textContent=summary.largest?`${summary.largest.name} / ${summary.largest.stream}`:'No observed consumer';
  $('behind').textContent=number(summary.behind);$('threshold-label').textContent=`More than ${number(data.settings.backlog_threshold)} pending deliveries`;$('streams-count').textContent=number(summary.streams);$('consumer-count').textContent=`${number(summary.consumers)} observed consumers`;$('storage').textContent=bytes(summary.stored_bytes);$('nav-streams').textContent=number(summary.streams);$('nav-consumers').textContent=number(summary.consumers);
  const issueNodes=s.issues.map(text=>element('div',text,'issue'));if(s.status==='partial')issueNodes.unshift(element('div','Partial coverage: counts below describe observed resources, not the entire account.','issue'));$('collection-issues').replaceChildren(...issueNodes);

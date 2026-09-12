@@ -1,4 +1,5 @@
 mod connection;
+mod editing;
 mod incidents;
 mod messages;
 mod monitoring;
@@ -27,6 +28,7 @@ use tokio::sync::RwLock;
 
 #[derive(Clone)]
 struct App {
+    editor: editing::Editor,
     db: store::Database,
     current: Arc<RwLock<Snapshot>>,
     nats: Arc<RwLock<Option<async_nats::Client>>>,
@@ -81,7 +83,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !demo {
         tokio::spawn(monitor.clone().collect());
     }
+    let allow_writes = match std::env::var("NATSUI_ALLOW_WRITES").as_deref() {
+        Ok("1") => !demo,
+        Err(_) | Ok("0") => false,
+        _ => return Err("NATSUI_ALLOW_WRITES must be 0 or 1".into()),
+    };
     let app = App {
+        editor: editing::Editor::new(allow_writes),
         connection,
         settings_cache,
         monitor,
@@ -108,7 +116,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         if demo {
             "DEMO simulation"
         } else {
-            "live, read-only NATS"
+            if allow_writes {
+                "live, reviewed NATS edits enabled"
+            } else {
+                "live, read-only NATS"
+            }
         }
     );
     axum::serve(listener, router)
@@ -186,6 +198,19 @@ fn router(app: App) -> Router {
         .route("/api/activity", get(activity))
         .route("/api/incidents", get(incident_history))
         .route("/api/monitoring/{kind}", get(monitor_inventory))
+        .route("/api/editing", get(editing::capabilities))
+        .route("/api/config", get(editing::read))
+        .route("/api/config/preview", axum::routing::post(editing::preview))
+        .route("/api/config/apply", axum::routing::post(editing::apply))
+        .route(
+            "/editing.js",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/javascript")],
+                    include_str!("../web/editing.js"),
+                )
+            }),
+        )
         .route("/api/settings", get(settings).put(save_settings))
         .route("/api/messages/{stream}/{sequence}", get(messages::message))
         .route("/api/records/{stream}", get(messages::browse))
@@ -252,7 +277,7 @@ async fn snapshot(State(app): State<App>) -> Json<Value> {
         Err(_) => app.settings_cache.read().await.clone(),
     };
     Json(
-        json!({"snapshot": state, "summary": telemetry::summarize(&state, settings.backlog_threshold), "settings": settings, "monitoring": app.monitor.current.read().await.clone(), "dashboard":{"version":env!("CARGO_PKG_VERSION"),"storage":app.db.health()}}),
+        json!({"snapshot": state, "summary": telemetry::summarize(&state, settings.backlog_threshold), "settings": settings, "monitoring": app.monitor.current.read().await.clone(), "dashboard":{"writes_enabled":app.editor.allowed && !app.demo,"version":env!("CARGO_PKG_VERSION"),"storage":app.db.health()}}),
     )
 }
 async fn readiness(State(app): State<App>) -> (StatusCode, Json<Value>) {

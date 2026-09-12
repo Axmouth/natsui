@@ -2,7 +2,7 @@
 
 **See what is happening in NATS and JetStream.**
 
-A local, read-only dashboard for consumer backlogs, stream storage, node resources and incident investigation. Inspect a point on a graph, follow it to a consumer, and check what is actually retained in the stream.
+A local dashboard with read-only access by default for consumer backlogs, stream storage, node resources and incident investigation. Inspect a point on a graph, follow it to a consumer, and check what is actually retained in the stream.
 
 [![Verify and package](https://github.com/Axmouth/natsui/actions/workflows/verify.yml/badge.svg)](https://github.com/Axmouth/natsui/actions/workflows/verify.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -94,7 +94,7 @@ Serve `dist-demo` with a static web server. It models workload phases, consumer 
 
 ## Status
 
-**Local read-only beta.** Stream and consumer inspection, node monitoring, retained-record browsing and investigation history are implemented. Shared login, public HTTP deployment, broker mutations and server configuration control are outside the current access model.
+**Local operator beta.** Stream and consumer inspection, node monitoring, retained-record browsing and investigation history are implemented. Settings includes opt-in, reviewed JetStream configuration edits. Shared login, public HTTP deployment and server configuration control remain outside the current access model.
 
 The integration suite has passed on Windows and Linux with NATS Server 2.11.8, including TLS, denied operations, reconnects and bounded large inventories. CI also targets macOS; support claims depend on successful runner results. The first endurance recording was interrupted and is not a completed 24-hour qualification. [Release evidence and remaining gates](RELEASE_CHECKLIST.md)
 
@@ -113,3 +113,7 @@ The [porting ledger](PORTING_LEDGER.md) records which Fibril ideas were adapted,
 ## Acknowledgments
 
 Inspired by [Fibril](https://github.com/Axmouth/fibril), with its theme collection and incident-oriented interface as the starting point. Original MIT attribution is preserved in [LICENSE](LICENSE). Natsui uses its own pixel kitten favicon and is an independent project, not an official NATS project.
+
+### Reviewed configuration editing
+
+Settings includes stream storage limits, capture subjects, discard behavior, replica count and consumer acknowledgment/retry controls. Connections remain read-only unless started with `NATSUI_ALLOW_WRITES=1` and suitable NATS permissions. Changes have a before/after preview, stale-configuration checks, readback verification and an Activity record. Live edits require NATS 2.11+ in the 2.x series. [Settings and boundaries](SETTINGS_AND_ACCESS.md#implemented-jetstream-editor).

@@ -4,7 +4,7 @@ The native dashboard listens on IPv4 loopback. Docker mode listens on the contai
 
 ## NATS identity
 
-The UI's read-only behavior does not reduce the permissions of its NATS credentials. A dedicated, restricted identity belongs in the application account being inspected. A system account is not required for JetStream inventory.
+The dashboard's default read-only behavior does not reduce the permissions of its NATS credentials. Native configuration writes require the explicit NATSUI_ALLOW_WRITES=1 startup option; broker authorization remains authoritative. A dedicated, restricted identity belongs in the application account being inspected. A system account is not required for JetStream inventory.
 
 `deploy/permissions.conf` is a permissions object for a NATS user. It allows only:
 
@@ -51,3 +51,18 @@ Message payloads and headers are fetched on demand and are not stored by Natsui.
 ## Remaining deployment gate
 
 Shared access requires authentication, payload-access authorization, settings roles and an explicit public-origin policy. Native broker mutations additionally require authorization and reviewable before/after changes. A NATS configuration supervisor is a separate deployment capability, not part of this application.
+
+## Optional local configuration editing
+
+`NATSUI_ALLOW_WRITES=1` enables reviewed edits under Settings for the configured profile. It does not grant NATS permissions. Existing restricted connections can continue to use `deploy/permissions.conf`, which includes consumer INFO reads but no mutation subjects.
+
+For a selected stream and consumer, additional publish permissions can be restricted to:
+
+```text
+$JS.API.STREAM.UPDATE.ORDERS
+$JS.API.CONSUMER.CREATE.ORDERS.worker
+```
+
+Names are examples. JetStream domains require the corresponding `$JS.<domain>.API` prefix. The consumer endpoint authorizes creation as well as updates at the NATS permission layer; this dashboard sends only update requests. Avoid blanket management permissions merely to edit one resource.
+
+The HTTP listener remains local operator access with no shared login. Other local processes are inside this trust boundary. Enabling writes is not suitable for exposing the dashboard publicly. Preview tokens, request headers and Host/Origin checks protect the reviewed local workflow; they do not replace authentication. See [settings ownership and edit guarantees](SETTINGS_AND_ACCESS.md#implemented-jetstream-editor).

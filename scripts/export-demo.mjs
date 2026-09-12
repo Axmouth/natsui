@@ -4,7 +4,7 @@ import path from 'node:path';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const destination=path.join(root,'dist-demo');
 await mkdir(destination,{recursive:true});
-for(const file of ['fibril.css','style.css','app.js','workspace.js','trends.js','subjects.js','demo.js','kitten.svg'])await copyFile(path.join(root,'web',file),path.join(destination,file));
+for(const file of ['fibril.css','style.css','app.js','editing.js','workspace.js','trends.js','subjects.js','demo.js','kitten.svg'])await copyFile(path.join(root,'web',file),path.join(destination,file));
 let html=await readFile(path.join(root,'web/index.html'),'utf8');
 html=html.replaceAll('href="/','href="./').replaceAll('src="/','src="./').replace('<script src="./demo.js"','<script src="./runtime.js" defer></script><script src="./demo.js"');
 await writeFile(path.join(destination,'index.html'),html);

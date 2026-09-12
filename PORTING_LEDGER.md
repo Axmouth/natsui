@@ -38,7 +38,7 @@ Source baseline: `../thetube/crates/admin` and `../thetube/website/src/content/d
 | F16 | Queue list and partition detail | Adapted | Stream inventory, separate consumer inventory, config detail dialogs | Native NATS entities replace Fibril queue partitions. |
 | F17 | Search and URL-persistent filters | Implemented | Stream/consumer search and above-threshold filter encoded in URL fragment | Shareable operational context. |
 | F18 | Queue hide-inactive toggle | Planned | Relevant consumer filters after inactivity semantics are defined | Durable consumers may intentionally be idle. |
-| F19 | Queue creation/deletion | Planned | Native stream/consumer creation, reviewed deletion, optional work-queue preset | Current adapter is read-only. |
+| F19 | Queue creation/deletion | Planned | Native stream/consumer creation, reviewed deletion, optional work-queue preset | Configuration updates are available; resource creation and deletion remain excluded. |
 | F20 | Queue idle loading/eviction/skip reasons | Not ported | No equivalent field or placeholder | Fibril storage implementation detail unavailable through standard NATS APIs. |
 | F21 | Oldest ready-message age | Optional integration | Retained age can be added; exact outstanding age needs adequate evidence | Oldest retained is not necessarily oldest pending for a consumer. |
 | F22 | Test publish | Planned | Explicit Core publish versus JetStream storage acknowledgment | Never label publish success as verified business processing. |
@@ -102,7 +102,7 @@ Design attribution appears in the README and About page. MIT license credit rema
 
 Seventeen Rust tests pass, including monitoring failure isolation, response bounds and live NATS 2.11.8 checks for overlapping filtered consumers, maximum-not-sum backlog and non-consuming message inspection. Browser verification covers filters, drilldowns, inspection, settings changes and theme/layout behavior. Full verification and remaining test gaps are recorded in README.md.
 
-Current priority: local read-only beta hardening and release evidence. Native resource edits require before/after review. Shared user management precedes externally accessible deployment. A deployment supervisor is not implemented or installed by this change.
+Current priority: local operator beta hardening and release evidence. Native configuration edits include before/after review and remain opt-in. Shared user management precedes externally accessible deployment. A deployment supervisor is not implemented or installed by this change.
 
 ### Real-cluster demo verification (2026-09-12)
 
@@ -158,3 +158,16 @@ Verification for the local beta increment: 22 Rust tests passed on Windows and L
 ### Public repository presentation
 
 The README presents the operational questions addressed by the dashboard, a clone-and-run cluster demo and screenshots of actual demo broker observations. Detailed setup and limits are retained in docs/OPERATIONS.md. Screenshots include consumer diagnostics and a light-themed node view. The interrupted endurance recording is labeled incomplete.
+
+## Native configuration editing increment
+
+| Aspect | Form | Reason and boundary |
+| --- | --- | --- |
+| Fibril administrative configuration | Adapted into Settings with reviewed native JetStream updates | Stream capacity/capture/replication and consumer acknowledgment/retry settings have native equivalents; server file and lifecycle control remain separate. |
+| Natsui addition: reviewed change workflow | Implemented | Allowlisted fields, exact numeric values, preview expiry, one-use apply, fresh configuration/creation identity check, before/after incidents and readback. External writers are not atomically excluded. |
+| Natsui addition: write capability | Implemented | Explicit per-instance/profile startup opt-in with native permission enforcement; read-only and simulated modes remain supported. Shared identities are not implied. |
+| Windows release packaging | Fixed | Tar runs in the output directory with a relative archive filename, avoiding GNU tar remote-host parsing of drive-letter paths. |
+
+Creation/deletion, consumer policy migration, server config files and supervision remain unimplemented. Earlier read-only beta entries describe the previous release slice; native editing supersedes the mutation deferral for the fields listed in SETTINGS_AND_ACCESS.md only.
+
+Verification: 25 Rust tests passed on Windows and Linux, including real NATS stream/consumer edits, immutable-field rejection, read-only/simulation gating, stale revisions, one-use previews and unchanged consumer delivery state. Browser verification applied and restored a stream limit against the three-node demo. Windows packaging passed with Git Bash GNU tar, and archive contents/checksum were checked.
