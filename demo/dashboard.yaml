@@ -1,0 +1,24 @@
+services:
+  dashboard:
+    build: ..
+    image: natsui:local
+    ports: ['127.0.0.1:${NATSUI_DEMO_PORT:-4321}:4321']
+    environment:
+      NATSUI_URL: nats://nats-1:4222
+      NATSUI_PROFILE: Demo cluster in Docker
+      NATSUI_MONITOR_URLS: http://nats-1:8222,http://nats-2:8222,http://nats-3:8222
+    volumes: ['dashboard-data:/data']
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    mem_limit: 512m
+    pids_limit: 128
+    depends_on:
+      nats-1: {condition: service_healthy}
+      nats-2: {condition: service_healthy}
+      nats-3: {condition: service_healthy}
+    logging:
+      driver: json-file
+      options: {max-size: 5m, max-file: '2'}
+volumes:
+  dashboard-data:

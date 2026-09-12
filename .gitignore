@@ -1,0 +1,19 @@
+/target/
+/data/
+/.tools/
+*.log
+.env
+
+
+/dist-release/
+/dist-demo/
+
+# Local connection material and unused legacy branding assets.
+.env.*
+!.env.example
+/local-secrets/
+*.creds
+*.key
+*.pem
+/web/mascot.png
+/web/favicon.png

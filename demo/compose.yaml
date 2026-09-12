@@ -1,0 +1,50 @@
+name: natsui-demo
+x-nats: &nats
+  image: nats:2.11.8-alpine
+  restart: unless-stopped
+  mem_limit: 256m
+  healthcheck:
+    test: [CMD, wget, -q, -O, /dev/null, 'http://127.0.0.1:8222/healthz?js-enabled-only=true']
+    interval: 5s
+    timeout: 3s
+    retries: 20
+  logging:
+    driver: json-file
+    options: {max-size: 5m, max-file: '2'}
+services:
+  nats-1:
+    <<: *nats
+    command: [-c, /etc/nats/demo.conf, --name, demo-1]
+    volumes: ['./nats.conf:/etc/nats/demo.conf:ro', 'node1:/data']
+    ports: ['127.0.0.1:14222:4222', '127.0.0.1:18222:8222']
+  nats-2:
+    <<: *nats
+    command: [-c, /etc/nats/demo.conf, --name, demo-2]
+    volumes: ['./nats.conf:/etc/nats/demo.conf:ro', 'node2:/data']
+    ports: ['127.0.0.1:14223:4222', '127.0.0.1:18223:8222']
+  nats-3:
+    <<: *nats
+    command: [-c, /etc/nats/demo.conf, --name, demo-3]
+    volumes: ['./nats.conf:/etc/nats/demo.conf:ro', 'node3:/data']
+    ports: ['127.0.0.1:14224:4222', '127.0.0.1:18224:8222']
+  traffic:
+    build: .
+    restart: unless-stopped
+    mem_limit: 128m
+    healthcheck:
+      test: [CMD, python, -c, "import pathlib,time; assert time.time()-float(pathlib.Path('/tmp/traffic-heartbeat').read_text()) < 20"]
+      interval: 5s
+      timeout: 3s
+      retries: 6
+      start_period: 30s
+    depends_on:
+      nats-1: {condition: service_healthy}
+      nats-2: {condition: service_healthy}
+      nats-3: {condition: service_healthy}
+    logging:
+      driver: json-file
+      options: {max-size: 5m, max-file: '2'}
+volumes:
+  node1:
+  node2:
+  node3:

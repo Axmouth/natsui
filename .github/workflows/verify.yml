@@ -1,0 +1,72 @@
+name: Verify and package
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest, macos-14]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+          cache: false
+      - name: Toolchain and disposable broker
+        shell: bash
+        run: |
+          rustup toolchain install 1.94.0 --profile minimal --component rustfmt --component clippy
+          rustup override set 1.94.0
+          go install github.com/nats-io/nats-server/v2@v2.11.8
+          echo "NATSUI_TEST_SERVER=$(go env GOPATH)/bin/nats-server${{ runner.os == 'Windows' && '.exe' || '' }}" >> "$GITHUB_ENV"
+          echo "NATSUI_TLS_FIXTURES=$(node scripts/tls-fixtures.mjs)" >> "$GITHUB_ENV"
+      - name: Verification
+        shell: bash
+        run: |
+          cargo fmt --check
+          cargo clippy --locked --all-targets -- -D warnings
+          cargo test --locked -- --include-ignored
+          node scripts/test-trends.mjs
+          node scripts/test-demo.mjs
+          for file in web/*.js scripts/*.mjs; do node --check "$file"; done
+      - name: Package native binary and demo
+        shell: bash
+        run: |
+          cargo build --release --locked
+          node scripts/package.mjs
+          node scripts/export-demo.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: natsui-${{ runner.os }}-${{ runner.arch }}
+          path: dist-release/
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Linux'
+        with:
+          name: standalone-demo
+          path: dist-demo/
+  container:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and smoke test
+        run: |
+          docker build --target verification -t natsui:verified .
+          docker build -t natsui:ci .
+          docker run -d --name natsui-ci -p 127.0.0.1:4321:4321 -v natsui-ci-data:/data --read-only --cap-drop ALL --security-opt no-new-privileges:true natsui:ci --demo
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:4321/readyz; then exit 0; fi
+            sleep 1
+          done
+          docker logs natsui-ci
+          exit 1
+      - name: Cleanup
+        if: always()
+        run: |
+          docker rm -f natsui-ci || true
+          docker volume rm natsui-ci-data || true
