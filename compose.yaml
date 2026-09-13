@@ -1,12 +1,12 @@
 name: natsui-local
 services:
   dashboard:
-    build: .
-    image: natsui:local
+    image: ghcr.io/axmouth/natsui:latest
     ports: ['127.0.0.1:4321:4321']
     environment:
       NATSUI_URL: ${NATSUI_URL:-nats://host.docker.internal:4222}
       NATSUI_PROFILE: ${NATSUI_PROFILE:-Local NATS in Docker}
+      NATSUI_ALLOW_WRITES: ${NATSUI_ALLOW_WRITES:-0}
       NATSUI_DOMAIN: ${NATSUI_DOMAIN:-}
       NATSUI_MONITOR_URLS: ${NATSUI_MONITOR_URLS:-}
     extra_hosts: ['host.docker.internal:host-gateway']

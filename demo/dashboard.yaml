@@ -4,6 +4,7 @@ services:
     image: natsui:local
     ports: ['127.0.0.1:${NATSUI_DEMO_PORT:-4321}:4321']
     environment:
+      NATSUI_ALLOW_WRITES: ${NATSUI_ALLOW_WRITES:-0}
       NATSUI_URL: nats://nats-1:4222
       NATSUI_PROFILE: Demo cluster in Docker
       NATSUI_MONITOR_URLS: http://nats-1:8222,http://nats-2:8222,http://nats-3:8222

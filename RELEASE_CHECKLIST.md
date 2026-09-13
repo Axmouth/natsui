@@ -40,3 +40,7 @@ NATS Server 2.11.8 is a compatibility test baseline, not a claim that it is the 
 ## Deferred beyond the local beta
 
 Shared login, roles, public HTTP exposure, resource creation/deletion, server configuration editing and restart supervision remain separate capabilities. Native stream and consumer configuration editing is opt-in for local operator use; default connections remain read-only.
+
+## Publishing
+
+`.github/workflows/publish.yml` runs after successful main-branch verification. Each native Linux architecture builds the dashboard and traffic images and exercises a fresh three-node cluster before pushing. The bundle combines architecture manifests, resolves image digests, and verifies the registry-delivered Compose application. Pages deploys the static landing page, demo and fallback Compose file. First publication requires GitHub Pages Source=GitHub Actions and public visibility for the three GHCR packages. See [publishing operations](docs/PUBLISHING.md).

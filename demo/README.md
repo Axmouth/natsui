@@ -2,7 +2,30 @@
 
 This Compose project is the basis for the local "try a cluster" experience. Traffic follows a scripted scenario, but streams, replication, delivery, acknowledgments, retries, retained records and dashboard history are real.
 
-## Start
+## Published one-command demo
+
+Docker Compose 2.34+ can fetch the entire application from the container registry:
+
+```sh
+docker compose -f oci://ghcr.io/axmouth/natsui-demo:latest up -d --wait
+```
+
+Open http://127.0.0.1:4321. This path needs no source checkout, Rust, Python or Node installation. AMD64 and ARM64 are supported by the published images. All configuration is in the bundle, which pins the component images to digests. `latest` and `main` track verified main-branch builds; `sha-<full-commit>` identifies a specific bundle. A commit tag can be used for subsequent lifecycle commands to keep the same bundle definition.
+
+The first run pulls the images and waits for broker, traffic and dashboard readiness. Only dashboard port 4321 is published on host loopback. NATS client and monitoring ports stay on the project network, so this bundle can coexist with other NATS installations. The dashboard and traffic images have no Docker socket or host-directory mounts. Reviewed resource editing is enabled in this isolated demo. Starting the traffic generator again may reconcile its configured resource settings; this is demo-owned configuration.
+
+```sh
+# Stop containers and retain named volumes.
+docker compose -f oci://ghcr.io/axmouth/natsui-demo:latest down
+# Delete this demo's containers, broker data and dashboard history.
+docker compose -f oci://ghcr.io/axmouth/natsui-demo:latest down -v
+```
+
+`NATSUI_DEMO_PORT` selects another dashboard port. Set it before the command: `export NATSUI_DEMO_PORT=4322` in Bash/Zsh, or `$env:NATSUI_DEMO_PORT='4322'` in PowerShell. `-p another-name` on every lifecycle command gives another isolated Compose project, with separate volumes; a second concurrent project also needs a different dashboard port.
+
+The downloadable [published.yaml](published.yaml) has no build or local file dependencies. It supports Compose 2.23.1+ and can be started with `docker compose -f published.yaml up -d --wait`. The existing source-build demo below remains available for development.
+
+## Start from source
 
 Docker Desktop must be running with Linux containers. Rust is required for the local dashboard. The first run downloads the pinned NATS image and builds the small Python traffic image.
 

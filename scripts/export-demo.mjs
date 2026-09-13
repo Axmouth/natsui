@@ -7,6 +7,7 @@ await mkdir(destination,{recursive:true});
 for(const file of ['fibril.css','style.css','app.js','editing.js','workspace.js','trends.js','subjects.js','demo.js','kitten.svg'])await copyFile(path.join(root,'web',file),path.join(destination,file));
 let html=await readFile(path.join(root,'web/index.html'),'utf8');
 html=html.replaceAll('href="/','href="./').replaceAll('src="/','src="./').replace('<script src="./demo.js"','<script src="./runtime.js" defer></script><script src="./demo.js"');
+html=html.replace('<head>', `<head><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">`);
 await writeFile(path.join(destination,'index.html'),html);
 await writeFile(path.join(destination,'runtime.js'),'globalThis.NATSUI_STATIC_DEMO = true;\n');
 console.log(`Standalone simulated demo: ${destination}`);

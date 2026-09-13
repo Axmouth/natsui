@@ -5,6 +5,8 @@
 A local dashboard with read-only access by default for consumer backlogs, stream storage, node resources and incident investigation. Inspect a point on a graph, follow it to a consumer, and check what is actually retained in the stream.
 
 [![Verify and package](https://github.com/Axmouth/natsui/actions/workflows/verify.yml/badge.svg)](https://github.com/Axmouth/natsui/actions/workflows/verify.yml)
+[Website](https://axmouth.github.io/natsui/) | [Browser demo](https://axmouth.github.io/natsui/demo/) | [Docker image](https://github.com/Axmouth/natsui/pkgs/container/natsui)
+
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 ![Natsui overview showing consumer backlogs and recorded history from a real three-node NATS cluster](docs/screenshots/overview.png)
@@ -37,27 +39,35 @@ Reported values, derived metrics and unavailable evidence stay distinct. Gaps re
 
 ## Try a real cluster
 
-Docker is enough. From a source checkout:
+Docker Desktop with Linux containers, or Docker Engine with Compose 2.34+, is enough. This command works in PowerShell, Bash and Zsh:
 
 ```sh
-git clone https://github.com/Axmouth/natsui.git
-cd natsui
-docker compose -f demo/compose.yaml -f demo/dashboard.yaml up --build -d --wait
+docker compose -f oci://ghcr.io/axmouth/natsui-demo:latest up -d --wait
 ```
 
-Open **[localhost:4321](http://localhost:4321)**. The setup includes three unmodified NATS servers, the dashboard and a traffic generator. Streams, consumers and Core NATS traffic move through steady, slow-consumer, burst and recovery phases. The scenario is scripted; the records and metrics come from real broker activity.
+Open **[localhost:4321](http://localhost:4321)**. No clone, local build or language toolchain is required. The bundle starts three unmodified NATS servers, Natsui and demo traffic. Real streams, consumers and Core NATS traffic move through steady, slow-consumer, burst and recovery phases. AMD64 and ARM64 container images are published.
 
 Stop the demo while preserving its data:
 
 ```sh
-docker compose -f demo/compose.yaml -f demo/dashboard.yaml down
+docker compose -f oci://ghcr.io/axmouth/natsui-demo:latest down
 ```
 
-Port 4321 must be available. `NATSUI_DEMO_PORT` selects another dashboard port. [Demo setup and lifecycle](demo/README.md) covers ports, volumes and the optional Windows launcher.
+The start command resumes it. Adding `-v` to the stop command deletes this demo's broker volumes and dashboard history. Port 4321 must be available; `NATSUI_DEMO_PORT` selects another dashboard port. The unauthenticated demo stays on an isolated Docker network, with only the dashboard published on host loopback. Reviewed configuration edits are enabled for the demo.
+
+[Download the standalone Compose file](https://axmouth.github.io/natsui/try/compose.yaml) for Compose 2.23.1+ and run `docker compose -f compose.yaml up -d --wait`. [Demo setup and lifecycle](demo/README.md) covers source builds, workload phases, ports and cleanup.
 
 ## Connect an existing NATS server
 
-Build the embedded native binary with Rust 1.94 or later and a C toolchain:
+The standalone image runs alongside an existing NATS service on its Docker network:
+
+```sh
+docker run -d --name natsui --network NATS_NETWORK -p 127.0.0.1:4321:4321 -e NATSUI_URL=nats://NATS_SERVICE:4222 -v natsui-data:/data --read-only --cap-drop ALL --security-opt no-new-privileges:true ghcr.io/axmouth/natsui:latest
+```
+
+`NATS_NETWORK` and `NATS_SERVICE` identify the existing network and broker. Natsui requires no Docker socket access. The root [compose.yaml](compose.yaml) also supports a broker on the host through `host.docker.internal`.
+
+Alternatively, build the embedded native binary with Rust 1.94 or later and a C toolchain:
 
 ```sh
 cargo build --release --locked
@@ -90,7 +100,9 @@ Use a dedicated restricted NATS identity. [Security and permissions](SECURITY.md
 node scripts/export-demo.mjs
 ```
 
-Serve `dist-demo` with a static web server. It models workload phases, consumer histories and incidents without connecting to NATS. Native node metrics remain explicitly unavailable in this mode. No hosted public demo is published yet.
+The hosted [browser demo](https://axmouth.github.io/natsui/demo/) models workload phases, consumer histories, retained records and incidents without connecting to NATS. Native node metrics remain explicitly unavailable. A Content Security Policy disables network connections from the demo.
+
+`dist-demo` can also be served by any static web server. `node scripts/build-site.mjs` builds the landing page, demo and downloadable Compose file together in `dist-site`.
 
 ## Status
 

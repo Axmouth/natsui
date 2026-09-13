@@ -1,0 +1,17 @@
+import {cp,mkdir,copyFile,writeFile,readFile} from 'node:fs/promises';
+import {fileURLToPath} from 'node:url';
+import path from 'node:path';
+import './export-demo.mjs';
+const root=path.resolve(fileURLToPath(new URL('..',import.meta.url)));
+const out=path.join(root,'dist-site');
+await mkdir(path.join(out,'assets'),{recursive:true});
+await mkdir(path.join(out,'try'),{recursive:true});
+await cp(path.join(root,'dist-demo'),path.join(out,'demo'),{recursive:true});
+for(const file of ['index.html','site.css','site.js'])await copyFile(path.join(root,'site',file),path.join(out,file));
+await copyFile(path.join(root,'web/kitten.svg'),path.join(out,'assets/kitten.svg'));
+await copyFile(path.join(root,'docs/screenshots/overview.png'),path.join(out,'assets/overview.png'));
+await copyFile(path.join(root,'demo/published.yaml'),path.join(out,'try/compose.yaml'));
+await writeFile(path.join(out,'.nojekyll'),'');
+const demo=await readFile(path.join(out,'demo/index.html'),'utf8');
+if(!demo.includes('connect-src &#39;none&#39;')&&!demo.includes("connect-src 'none'"))throw new Error('Static demo must disallow network connections');
+console.log(`GitHub Pages site: ${out}`);

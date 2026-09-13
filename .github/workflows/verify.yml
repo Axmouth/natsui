@@ -40,7 +40,7 @@ jobs:
         run: |
           cargo build --release --locked
           node scripts/package.mjs
-          node scripts/export-demo.mjs
+          node scripts/test-site.mjs
       - uses: actions/upload-artifact@v4
         with:
           name: natsui-${{ runner.os }}-${{ runner.arch }}

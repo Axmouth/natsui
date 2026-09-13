@@ -19,3 +19,5 @@
 !docs/**
 !demo/
 !demo/README.md
+!demo/published.yaml
+!compose.yaml

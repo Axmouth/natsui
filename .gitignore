@@ -17,3 +17,5 @@
 *.pem
 /web/mascot.png
 /web/favicon.png
+
+/dist-site/

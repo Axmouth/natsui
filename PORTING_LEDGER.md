@@ -171,3 +171,16 @@ The README presents the operational questions addressed by the dashboard, a clon
 Creation/deletion, consumer policy migration, server config files and supervision remain unimplemented. Earlier read-only beta entries describe the previous release slice; native editing supersedes the mutation deferral for the fields listed in SETTINGS_AND_ACCESS.md only.
 
 Verification: 25 Rust tests passed on Windows and Linux, including real NATS stream/consumer edits, immutable-field rejection, read-only/simulation gating, stale revisions, one-use previews and unchanged consumer delivery state. Browser verification applied and restored a stream limit against the three-node demo. Windows packaging passed with Git Bash GNU tar, and archive contents/checksum were checked.
+
+## Published tryout and browser demo
+
+| Aspect | Form | Reason and boundary |
+| --- | --- | --- |
+| Fibril one-command cluster tryout | Adapted as a published Docker Compose OCI bundle | One cross-platform Docker command starts three unmodified NATS servers, a dashboard and traffic, without a clone or compiler. Inline broker configuration removes local-file dependencies. |
+| Fibril public demo entry point | Adapted as a GitHub Pages landing page with the fully simulated dashboard | An immediate browser preview complements the real cluster. Demo assets are self-contained and connection attempts are blocked by Content Security Policy. |
+| Natsui addition: standalone image | Published through GitHub Actions after successful verification | Dashboard and traffic images target Linux AMD64 and ARM64. The standalone dashboard works alongside existing NATS, with no broker plugin or Docker socket. |
+| Natsui addition: digest-pinned demo bundle | Published after native-architecture real-cluster smoke checks | Image digests keep a bundle's components consistent. latest/main track verified builds; full commit tags identify individual builds. |
+
+The published demo uses its own Compose project and named volumes. Only the dashboard is exposed on loopback; stopping retains data and explicit down -v deletes it. Source-build demos remain available. Package visibility and Pages enablement are repository-owner settings; public availability requires verification after the initial publication.
+
+Local verification: fresh-volume Compose startup reported three replicated streams, five consumers and all monitoring endpoints. Billing pending ranged from 200 to 18,045 across the workload phases; history and real retained-record inspection passed. A temporary local registry round trip verified OCI publication, inline configuration, the custom-port variable and readyz before removing its test project. The static demo rendered in the browser with synthetic history and no backend. Public package visibility and hosted deployment are verified separately after publication.

@@ -1,0 +1,132 @@
+name: Publish images and demo
+on:
+  workflow_run:
+    workflows: [Verify and package]
+    types: [completed]
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: publish-main
+  cancel-in-progress: false
+jobs:
+  images:
+    if: github.repository == 'Axmouth/natsui' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_repository.full_name == github.repository
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {arch: amd64, runner: ubuntu-24.04}
+          - {arch: arm64, runner: ubuntu-24.04-arm}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and exercise the real cluster
+        env:
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          docker build --label org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY} --label org.opencontainers.image.revision=${SHA} -t ghcr.io/axmouth/natsui:sha-${SHA}-${ARCH} .
+          docker build --label org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY} --label org.opencontainers.image.revision=${SHA} -t ghcr.io/axmouth/natsui-traffic:sha-${SHA}-${ARCH} demo
+          node scripts/smoke-published.mjs ghcr.io/axmouth/natsui:sha-${SHA}-${ARCH} ghcr.io/axmouth/natsui-traffic:sha-${SHA}-${ARCH}
+      - name: Push verified images
+        env:
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          docker push ghcr.io/axmouth/natsui:sha-${SHA}-${ARCH}
+          docker push ghcr.io/axmouth/natsui-traffic:sha-${SHA}-${ARCH}
+  bundle:
+    needs: images
+    outputs:
+      published: ${{ steps.promote.outputs.published }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish multi-platform images and Compose bundle
+        env:
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          for image in natsui natsui-traffic; do
+            docker buildx imagetools create -t ghcr.io/axmouth/${image}:sha-${SHA} ghcr.io/axmouth/${image}:sha-${SHA}-amd64 ghcr.io/axmouth/${image}:sha-${SHA}-arm64
+          done
+          sed "s/:latest/:sha-${SHA}/g" demo/published.yaml > /tmp/natsui-published.yaml
+          docker compose -f /tmp/natsui-published.yaml publish --with-env --resolve-image-digests -y ghcr.io/axmouth/natsui-demo:sha-${SHA}
+      - name: Verify the published bundle
+        env:
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          NATSUI_DEMO_PORT: '14321'
+          COMPOSE_PROJECT_NAME: natsui-registry-check
+        run: |
+          docker compose -f oci://ghcr.io/axmouth/natsui-demo:sha-${SHA} up -y -d --wait --wait-timeout 180
+          curl -fsS http://127.0.0.1:14321/readyz
+          docker compose -f oci://ghcr.io/axmouth/natsui-demo:sha-${SHA} down -v
+      - name: Promote the verified bundle
+        id: promote
+        env:
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          current=$(git ls-remote https://github.com/${GITHUB_REPOSITORY}.git refs/heads/main | cut -f1)
+          if [ "$current" != "$SHA" ]; then
+            echo "A newer main commit exists; commit-tagged artifacts remain available."
+            exit 0
+          fi
+          for image in natsui natsui-traffic; do
+            docker buildx imagetools create -t ghcr.io/axmouth/${image}:latest -t ghcr.io/axmouth/${image}:main ghcr.io/axmouth/${image}:sha-${SHA}
+          done
+          for tag in latest main; do
+            docker compose -f /tmp/natsui-published.yaml publish --with-env --resolve-image-digests -y ghcr.io/axmouth/natsui-demo:${tag}
+          done
+          echo "published=true" >> "$GITHUB_OUTPUT"
+  pages:
+    needs: bundle
+    if: needs.bundle.outputs.published == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node scripts/build-site.mjs
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist-site
+      - id: deploy
+        uses: actions/deploy-pages@v4
