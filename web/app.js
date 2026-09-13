@@ -226,12 +226,13 @@ function renderMonitorCoverage(monitor, disconnected=false){
  const reporting=nodes.filter(n=>n.status==='complete'&&Date.now()/1000-n.at<=15).length;
  let state='neutral',label='Monitoring not configured',detail='Set NATSUI_MONITOR_URLS to enable node monitoring.';
  if(disconnected){state='unavailable';label='Monitoring unavailable';detail='The dashboard could not refresh monitoring data.';}
- else if(monitor.status!=='not_configured'){
+ else if(monitor?.demo){state='neutral';label=`${nodes.length}/${nodes.length} simulated nodes`;detail='Synthetic process and client metrics follow the demo workload. No NATS processes or containers are measured.';}
+ else if(monitor?.status!=='not_configured'){
   if(nodes.length){state=reporting===nodes.length?'complete':reporting?'partial':'unavailable';label=`${reporting}/${nodes.length} reporting`;detail=`${reporting} of ${nodes.length} configured monitoring endpoints have successful observations within 15 seconds.`;}
   else{state=monitor.status==='connecting'?'partial':'unavailable';label=monitor.status==='connecting'?'Connecting to monitoring':'Monitoring unavailable';detail='Waiting for node monitoring observations.';}
  }
  host.dataset.state=state;host.textContent=label;
- host.title=detail+' CPU and RAM measure NATS processes, not container limits or remaining capacity.';
+ host.title=detail+(monitor?.demo?'':' CPU and RAM measure NATS processes, not container limits or remaining capacity.');
 }
 function renderResources(){
  const monitor=data.monitoring||{status:'not_configured',nodes:[]},nodes=monitor.nodes||[];
@@ -269,11 +270,11 @@ function renderResources(){
   const nodeValid=n.status==='complete'&&Date.now()/1000-n.at<=15;$('load-connections').disabled=!nodeValid||$('load-connections').dataset.busy==='1';$('page-title').textContent=n.server_name||n.server_id;
   const identity={server_id:n.server_id,start:n.start};
   if($('node-summary').dataset.identity!==n.server_id){$('node-connections').replaceChildren();$('node-summary').dataset.identity=n.server_id;}
-  $('node-summary').replaceChildren(element('h2',nodeValid?`${n.cpu??'--'}% CPU / ${bytes(n.mem)} resident RAM`:'Monitoring unavailable. Historical observations remain below.'),element('p',`NATS ${n.version} / uptime ${n.uptime} / ${number(n.connections)} connections. Observed ${new Date(n.at*1000).toLocaleTimeString()}.`),element('p',`JetStream file storage: ${bytes(n.js_storage)}${percent(n.js_storage,n.js_max_storage)?' / '+percent(n.js_storage,n.js_max_storage)+' of configured budget':''}. Memory-store bytes: ${bytes(n.js_memory)}. These are separate from process RAM.`),element('p','CPU is reported by NATS and is not container-quota utilization. Slow-consumer counts describe transport pressure, not JetStream pending delivery.'));
+  $('node-summary').replaceChildren(element('h2',nodeValid?`${n.cpu??'--'}% CPU / ${bytes(n.mem)} resident RAM`:'Monitoring unavailable. Historical observations remain below.'),element('p',`NATS ${n.version} / uptime ${n.uptime} / ${number(n.connections)} connections. Observed ${new Date(n.at*1000).toLocaleTimeString()}.`),element('p',`JetStream file storage: ${bytes(n.js_storage)}${percent(n.js_storage,n.js_max_storage)?' / '+percent(n.js_storage,n.js_max_storage)+' of configured budget':''}. Memory-store bytes: ${bytes(n.js_memory)}. These are separate from process RAM.`),element('p',monitor.demo?'All process metrics and client counters in this view are synthetic. No NATS processes or containers are measured.':'CPU is reported by NATS and is not container-quota utilization. Slow-consumer counts describe transport pressure, not JetStream pending delivery.'));
   resourceCharts('node-charts',JSON.stringify(identity),[
    {field:'cpu',label:'Process CPU (%)',format:v=>`${v.toFixed(1)}%`,points:resourceSeries('node',identity,'cpu')},
    {field:'mem',label:'Resident memory',format:bytes,points:resourceSeries('node',identity,'mem')},
-   {field:'in_msgs',label:'Inbound messages / second',points:resourceSeries('node',identity,'in_msgs',true),note:'Native server counter delta; includes management traffic, not business throughput.'},
+   {field:'in_msgs',label:'Inbound messages / second',points:resourceSeries('node',identity,'in_msgs',true),note:monitor.demo?'Synthetic counter delta following the workload phases.':'Native server counter delta; includes management traffic, not business throughput.'},
    {field:'out_msgs',label:'Outbound messages / second',points:resourceSeries('node',identity,'out_msgs',true)},
    {field:'api_errors',label:'JetStream API errors / second',points:resourceSeries('node',identity,'api_errors',true),note:'Includes expected management errors. Not failed application jobs.'},
    {field:'total_connections',label:'New connections / second',points:resourceSeries('node',identity,'total_connections',true),note:'Counter deltas reset across server restarts and missing observations.'}

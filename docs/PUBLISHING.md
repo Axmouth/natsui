@@ -12,7 +12,7 @@ Publication follows successful main-branch `Verify and package` runs through `Pu
 
 Main-branch publications produce `latest`, `main` and `sha-<full-commit>` tags. The Compose artifact pins dashboard, traffic and NATS images to registry digests. No versioned release or stable-version guarantee is implied by `latest`.
 
-The initial packages are private by default on GHCR. The repository owner must open each package's settings and change visibility to Public. Anonymous manifest access and a fresh unauthenticated pull verify public availability. A workflow login succeeding is not evidence of anonymous access.
+Package visibility must allow anonymous reads. If a package is private, its owner can change visibility to Public in package settings. The initial Natsui publication was verified with anonymous access to all three packages. Anonymous manifest access and a fresh unauthenticated pull verify public availability. A workflow login succeeding is not evidence of anonymous access.
 
 ## Pages
 

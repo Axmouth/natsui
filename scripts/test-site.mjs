@@ -20,5 +20,5 @@ const compose=await readFile(path.join(root,'try/compose.yaml'),'utf8');
 assert.ok(!/^\s+build:/m.test(compose));assert.ok(!compose.includes('docker.sock'));assert.ok(compose.includes('127.0.0.1:'));
 globalThis.fetch=()=>{throw new Error('The simulation must not use a network request');};
 await import('../web/subjects.js');await import('../web/demo.js');
-for(const uri of ['/api/snapshot','/api/history','/api/incidents','/api/activity','/api/records/ORDERS','/api/latest/ORDERS'])assert.ok(await globalThis.NatsuiDemo.api(uri));
+for(const uri of ['/api/snapshot','/api/history','/api/incidents','/api/activity','/api/records/ORDERS','/api/latest/ORDERS','/api/monitoring/connections?page=0','/api/monitoring/subscriptions?page=0','/api/nodes/0/connections'])assert.ok(await globalThis.NatsuiDemo.api(uri));
 console.log('Pages subpath links, embedded assets, static network isolation and demo API routes passed.');

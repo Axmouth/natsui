@@ -100,7 +100,7 @@ Use a dedicated restricted NATS identity. [Security and permissions](SECURITY.md
 node scripts/export-demo.mjs
 ```
 
-The hosted [browser demo](https://axmouth.github.io/natsui/demo/) models workload phases, consumer histories, retained records and incidents without connecting to NATS. Native node metrics remain explicitly unavailable. A Content Security Policy disables network connections from the demo.
+The hosted [browser demo](https://axmouth.github.io/natsui/demo/) models workload phases, consumer histories, retained records and incidents without connecting to NATS. Synthetic node CPU/RAM histories, connection turnover, traffic counters and subscriptions illustrate the monitoring views without measuring real processes. A Content Security Policy disables network connections from the demo.
 
 `dist-demo` can also be served by any static web server. `node scripts/build-site.mjs` builds the landing page, demo and downloadable Compose file together in `dist-site`.
 

@@ -184,3 +184,16 @@ Verification: 25 Rust tests passed on Windows and Linux, including real NATS str
 The published demo uses its own Compose project and named volumes. Only the dashboard is exposed on loopback; stopping retains data and explicit down -v deletes it. Source-build demos remain available. Package visibility and Pages enablement are repository-owner settings; public availability requires verification after the initial publication.
 
 Local verification: fresh-volume Compose startup reported three replicated streams, five consumers and all monitoring endpoints. Billing pending ranged from 200 to 18,045 across the workload phases; history and real retained-record inspection passed. A temporary local registry round trip verified OCI publication, inline configuration, the custom-port variable and readyz before removing its test project. The static demo rendered in the browser with synthetic history and no backend. Public package visibility and hosted deployment are verified separately after publication.
+
+
+## Browser demo monitoring increment
+
+| Aspect | Form | Reason and boundary |
+| --- | --- | --- |
+| Fibril inspectable node histories | Adapted into the browser simulation | Three modeled nodes include CPU, resident memory, connections and subscription trends, plus detailed traffic and counter histories. No processes or containers are measured. |
+| Natsui addition: synthetic client inventory | Implemented in the browser adapter | Producers, workers, temporary burst clients, RTT, pending output and subscription interest make connection and subject inspection usable without a backend. Node counts agree with client inventories. |
+| Natsui addition: repeatable monitoring workload | Implemented | Lifetime counters remain monotonic across cycles; temporary clients receive new identities. Connection rates retain the same two-observation requirement as real monitoring. |
+
+Verification: simulation checks cover three cycles, counter continuity, client turnover, subscription totals, pagination and API errors. Trend tests and static-site network isolation checks passed. Browser inspection confirmed populated node sparklines and detail graphs, connection rates after refresh, client inspection and subscription queue groups. Synthetic monitoring is specific to the browser adapter; backend simulation and live monitoring retain their existing behavior.
+
+Public publication verification: the landing page and browser demo returned HTTP 200. All three GHCR packages allowed anonymous manifest reads, with AMD64 and ARM64 image platforms. The published latest Compose bundle started successfully with an empty Docker credential configuration and reported three real NATS nodes, three streams and five consumers. Its disposable smoke-test project and volumes were removed afterward.
