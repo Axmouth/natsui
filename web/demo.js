@@ -93,5 +93,13 @@
  }
  function pause(){if(paused){offset=frozen;start=Date.now();paused=false;}else{frozen=elapsed();paused=true;}return paused;}
  function reset(){start=Date.now();offset=120;frozen=120;paused=false;lastSecond=-1;seed();}
- root.NatsuiDemo={model,summary,inventory,api,pause,reset};
+ const subjectExamples=[
+  {subject:'orders.created',detail:'ORDERS capture with billing and fulfillment consumers.'},
+  {subject:'payments.captured',detail:'PAYMENTS capture with settlement and receipt consumers.'},
+  {subject:'jobs.resize',detail:'JOBS work-queue capture with image workers.'},
+  {subject:'dispatch.resize',detail:'Core NATS queue-group interest; no configured stream capture.'},
+  {subject:'telemetry.worker.cpu',detail:'Wildcard subscription interest; no configured stream capture.'},
+  {subject:'unmatched.example',detail:'No capture or subscription match in this demo inventory.'}
+ ];
+ root.NatsuiDemo={model,summary,inventory,subjectExamples,api,pause,reset};
 })(globalThis);

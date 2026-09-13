@@ -197,3 +197,12 @@ Local verification: fresh-volume Compose startup reported three replicated strea
 Verification: simulation checks cover three cycles, counter continuity, client turnover, subscription totals, pagination and API errors. Trend tests and static-site network isolation checks passed. Browser inspection confirmed populated node sparklines and detail graphs, connection rates after refresh, client inspection and subscription queue groups. Synthetic monitoring is specific to the browser adapter; backend simulation and live monitoring retain their existing behavior.
 
 Public publication verification: the landing page and browser demo returned HTTP 200. All three GHCR packages allowed anonymous manifest reads, with AMD64 and ARM64 image platforms. The published latest Compose bundle started successfully with an empty Docker credential configuration and reported three real NATS nodes, three streams and five consumers. Its disposable smoke-test project and volumes were removed afterward.
+
+
+## Browser demo subject discovery
+
+| Aspect | Form | Reason and boundary |
+| --- | --- | --- |
+| Natsui addition: discoverable demo subjects | Implemented as six clickable examples and automatically loaded synthetic subscriptions | Stream-backed subjects, Core NATS queue-group and wildcard interest, and an unmatched subject make the existing subject tracer discoverable. Example subjects are explicitly synthetic and do not imply an exhaustive NATS subject catalog. |
+
+The browser demo labels subscription inventory as simulated. Real monitoring retains on-demand subscription loading. Clearing the subject query restores the full loaded subscription inventory. Verification covers example capture and interest relationships, static export and browser navigation through matching and unmatched examples.

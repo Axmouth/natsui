@@ -28,7 +28,18 @@ globalThis.NatsuiWorkspace={chartEvents,openIncident};
 function resourceLink(label,url){const a=element('a',label,'name-button');a.href=url;return a;}
 function renderSubjects(){
  if(currentPage()!=='subjects')return;const subject=$('subject-query').value.trim(),host=$('subject-results');
- if(!subject){host.replaceChildren(element('p','Enter a subject to see configured matches.'));return;}
+ const examples=$('demo-subject-examples');
+ if(staticDemo){
+  examples.hidden=false;$('subscriptions-heading').textContent='Simulated subscriptions';
+  if(!examples.firstElementChild){
+   examples.append(element('h2','Sample subjects'),element('p','Explore a synthetic subject to compare stream capture, consumer filters and subscription interest.','panel-note'));
+   const rows=NatsuiDemo.subjectExamples.map(example=>{const name=cell();name.append(resourceLink(example.subject,'#subjects?'+new URLSearchParams({q:example.subject})));return [name,cell(example.detail)];});
+   const wrapper=element('div',null,'table-wrap');wrapper.append(table([['Subject'],['Scenario']],rows));examples.append(wrapper,element('hr'));
+  }
+  if(!workspaceState.subscriptions&&!workspaceState.loading.subscriptions)loadInventory('subscriptions');
+ }
+ renderSubscriptions();
+ if(!subject){host.replaceChildren(element('p',staticDemo?'Choose a sample above or enter a literal subject. The subscription inventory below covers all demo subjects.':'Enter a subject to see configured matches.'));return;}
  if(!NatsuiSubjects.valid(subject)||/[*>]/.test(subject)){host.replaceChildren(element('p','Enter a literal subject, such as orders.created. Wildcards belong in the configured filters.','issue'));return;}
  const streams=data.snapshot.streams.filter(s=>(s.config.subjects||[]).some(f=>NatsuiSubjects.matches(f,subject))),consumers=data.snapshot.consumers.filter(c=>streams.some(s=>s.config.name===c.stream_name)&&NatsuiSubjects.filters(c).some(f=>NatsuiSubjects.matches(f,subject)));
  const panels=element('div',null,'subject-context'),left=element('section'),right=element('section');left.append(element('h3',`${streams.length} configured capturing streams`));

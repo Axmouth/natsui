@@ -52,3 +52,12 @@ await assert.rejects(()=>api('/api/nodes/3/connections'));
 await assert.rejects(()=>api('/api/monitoring/connections?page=-1'));
 await assert.rejects(()=>api('/api/monitoring/unknown'));
 console.log('Synthetic node histories, inventory consistency, counter continuity, client turnover and monitoring routes passed.');
+
+const examples=globalThis.NatsuiDemo.subjectExamples,snapshot=model(50),subs=inventory(50,1050,'subscriptions').nodes.flatMap(n=>n.rows);
+assert.equal(examples.length,6);
+for(const example of examples)assert.ok(NatsuiSubjects.valid(example.subject)&&!/[*>]/.test(example.subject));
+for(const subject of ['orders.created','payments.captured','jobs.resize'])assert.equal(snapshot.streams.filter(s=>s.config.subjects.some(f=>NatsuiSubjects.matches(f,subject))).length,1);
+for(const subject of ['dispatch.resize','telemetry.worker.cpu']){assert.ok(subs.some(s=>NatsuiSubjects.matches(s.subject,subject)));assert.ok(!snapshot.streams.some(s=>s.config.subjects.some(f=>NatsuiSubjects.matches(f,subject))));}
+assert.ok(subs.some(s=>s.qgroup==='dispatch-workers'&&NatsuiSubjects.matches(s.subject,'dispatch.resize')));
+assert.ok(!subs.some(s=>NatsuiSubjects.matches(s.subject,'unmatched.example')));
+console.log('Subject examples distinguish stream capture, Core NATS interest and unmatched subjects.');
