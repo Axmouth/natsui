@@ -131,7 +131,7 @@ async function refresh(){
 }
 $('refresh').onclick=refresh;
 const flavors=[['','Original'],['neuronic','Neuronic'],['chlorophyll','Chlorophyll'],['crimson','Crimson'],['eosin','Eosin'],['azure','Azure'],['iris','Iris'],['carotene','Carotene']];
-function closeFlavors(focus=false){$('flavor-menu').hidden=true;$('flavor-btn').setAttribute('aria-expanded','false');if(focus)$('flavor-btn').focus();}
+function closeFlavors(focus=false){$('flavor-menu').hidden=true;$('flavor-btn').setAttribute('aria-expanded','false');if(focus)$('flavor-btn').focus({preventScroll:true});}
 function applyFlavor(value){
  document.documentElement.dataset.flavor=value;
  const label=flavors.find(([id])=>id===value)[1];
@@ -140,7 +140,7 @@ function applyFlavor(value){
 }
 for(const [value,label] of flavors){const button=element('button',null,'flavor-item');button.type='button';button.dataset.flavor=value;const swatch=element('span',null,'swatch');swatch.setAttribute('aria-hidden','true');button.append(swatch,element('span',label));button.onclick=()=>{applyFlavor(value);localStorage.setItem('natsui-flavor',value);closeFlavors(true);};$('flavor-menu').append(button);}
 const savedFlavor=localStorage.getItem('natsui-flavor')||'';applyFlavor(flavors.some(([id])=>id===savedFlavor)?savedFlavor:'');
-$('flavor-btn').onclick=()=>{const open=$('flavor-menu').hidden;$('flavor-menu').hidden=!open;$('flavor-btn').setAttribute('aria-expanded',String(open));if(open)$('flavor-menu').querySelector('[aria-pressed="true"]').focus();};
+$('flavor-btn').onclick=()=>{const open=$('flavor-menu').hidden;$('flavor-menu').hidden=!open;$('flavor-btn').setAttribute('aria-expanded',String(open));if(open)$('flavor-menu').querySelector('[aria-pressed="true"]').focus({preventScroll:true});};
 document.addEventListener('pointerdown',event=>{if(!$('flavor-pick').contains(event.target))closeFlavors();});
 document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!$('flavor-menu').hidden){event.preventDefault();closeFlavors(true);}});
 $('flavor-pick').addEventListener('focusout',event=>{if(!$('flavor-pick').contains(event.relatedTarget))closeFlavors();});

@@ -206,3 +206,14 @@ Public publication verification: the landing page and browser demo returned HTTP
 | Natsui addition: discoverable demo subjects | Implemented as six clickable examples and automatically loaded synthetic subscriptions | Stream-backed subjects, Core NATS queue-group and wildcard interest, and an unmatched subject make the existing subject tracer discoverable. Example subjects are explicitly synthetic and do not imply an exhaustive NATS subject catalog. |
 
 The browser demo labels subscription inventory as simulated. Real monitoring retains on-demand subscription loading. Clearing the subject query restores the full loaded subscription inventory. Verification covers example capture and interest relationships, static export and browser navigation through matching and unmatched examples.
+
+
+## Persistent workspace context
+
+| Aspect | Form | Reason and boundary |
+| --- | --- | --- |
+| Fibril persistent header | Adapted as a sticky Natsui top bar | Workspace identity, connection mode, navigation search and appearance controls remain accessible while scrolling long views. An opaque theme background separates content below; the existing compact mobile layout is retained. Scroll padding leaves clearance for focused controls. |
+
+The shared stylesheet applies to live dashboards and the browser demo. Page titles and scenario controls remain in normal document flow.
+
+Verification: the static build passed and browser inspection confirmed the header remains visible over a long subject inventory in the narrow layout, with the theme menu layered above content. Theme-menu focus preserves the scroll position.
