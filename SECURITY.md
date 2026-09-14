@@ -25,6 +25,8 @@ All other publish and subscribe subjects are excluded by the allowlists. Applica
 
 For a JetStream domain, replace the $JS.API prefix with $JS.<domain>.API. Scoped identities can replace stream wildcards with explicit names; STREAM.LIST and CONSUMER.LIST still reveal the inventory permitted by the broker API. This template is for subject permissions, not complete account/JWT provisioning. Account exports/imports and operator policies remain deployment-specific.
 
+NATSUI_URL accepts up to 32 comma-separated seeds for one cluster/account. Startup races authenticated connections and keeps the first success. Every attempt retains the complete seed list for reconnects. URL authentication is shared across seeds, and conflicting inline credentials are rejected. A tls:// seed or explicit TLS configuration requires encryption on all peers. NATSUI_MONITOR_URLS remains an independently configured HTTP(S) list that is collected per endpoint.
+
 Native permission and TLS references: [NATS authorization](https://docs.nats.io/running-a-nats-service/configuration/securing_nats/authorization), [JetStream API](https://docs.nats.io/reference/reference-protocols/nats_api_reference), [NATS TLS](https://docs.nats.io/running-a-nats-service/configuration/securing_nats/tls).
 
 ## Credentials and TLS
@@ -50,7 +52,7 @@ The container UID 10001 must be able to read mounted files. Secret directories a
 
 ## History identity and migration
 
-Profile bindings store SHA-256 digests, not raw connection credentials. Different configured endpoints, users, domains or credential-file contents require distinct profiles. A server restart or cluster-discovered peer does not change the configured binding. Password rotation for an unchanged URL username is supported. Replacing an account behind an unchanged endpoint/username cannot be detected automatically by this guard.
+Profile bindings store SHA-256 digests, not raw connection credentials. Different configured seed sets, users, domains or credential-file contents require distinct profiles. Seed ordering and duplicate addresses do not change the binding. Existing single-seed profiles retain their previous binding, but expanding to multiple seeds requires a new profile name. A server restart, the seed that wins the startup race, or a cluster-discovered peer does not change the configured binding. Password rotation for an unchanged URL username is supported. Replacing an account behind an unchanged endpoint/username cannot be detected automatically by this guard.
 
 For existing unbound history, NATSUI_ADOPT_LEGACY_PROFILE=1 permits initial binding after confirming its origin. This option never overrides an existing conflicting binding. A new profile or data directory is the safe default when origin is uncertain. The additive schema upgrade preserves existing observations but older application versions cannot open the newer schema. A stopped-process backup before upgrading preserves rollback options.
 

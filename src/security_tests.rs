@@ -485,3 +485,92 @@ async fn reviewed_configuration_edits() {
             .any(|e| e["detail"] == "Natsui configuration edit: applied and verified")
     );
 }
+
+#[tokio::test]
+#[ignore = "Requires NATSUI_TEST_SERVER and NATSUI_TLS_FIXTURES"]
+async fn concurrent_tls_seeds_recover_without_advertised_peers() {
+    use futures_util::StreamExt;
+    let mut first = Server::start(true);
+    let mut second = Server::start(true);
+    let first_admin = first.client("admin", "test-admin", true).await;
+    let second_admin = second.client("admin", "test-admin", true).await;
+    drop(first_admin);
+    drop(second_admin);
+    first.stop();
+
+    // This endpoint accepts TCP but never completes the NATS handshake.
+    let stalled = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let stalled_port = stalled.local_addr().unwrap().port();
+    let hold = tokio::spawn(async move {
+        let mut sockets = Vec::new();
+        while let Ok((socket, _)) = stalled.accept().await {
+            sockets.push(socket);
+        }
+    });
+    let mut config = first.connection("observer", "test-reader", true);
+    config.url = format!(
+        "tls://127.0.0.1:{stalled_port},{},nats://127.0.0.1:{}",
+        config.url, second.port
+    );
+    let connected = tokio::time::timeout(Duration::from_secs(2), config.connect()).await;
+    hold.abort();
+    let client = connected
+        .expect("A stalled seed must not delay the working TLS seed")
+        .unwrap();
+    assert_eq!(
+        telemetry::observe(&client, "$JS.API", "seeds").await.status,
+        "complete"
+    );
+    let original_server = client.server_info().server_id;
+    assert!(
+        client.server_info().connect_urls.is_empty(),
+        "This fixture must exercise configured seeds without discovery"
+    );
+
+    // The servers deliberately have no routes. This checks transport fallback, not replication.
+    first.restart();
+    let admin = first.client("admin", "test-admin", true).await;
+    let inbox = client.new_inbox();
+    let mut subscription = client.subscribe(inbox.clone()).await.unwrap();
+    client.flush().await.unwrap();
+    second.stop();
+    let mut recovered = false;
+    for _ in 0..30 {
+        if telemetry::observe(&client, "$JS.API", "seeds").await.status == "complete"
+            && client.server_info().server_id != original_server
+        {
+            recovered = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(
+        recovered,
+        "The existing client must retain and reconnect through another configured seed"
+    );
+    admin.publish(inbox, "after failover".into()).await.unwrap();
+    admin.flush().await.unwrap();
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(2), subscription.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .payload
+            .as_ref(),
+        b"after failover"
+    );
+
+    let mut no_certificate = config.clone();
+    no_certificate.certificate = None;
+    no_certificate.key = None;
+    assert!(
+        no_certificate.connect().await.is_err(),
+        "Racing must not bypass client certificate requirements"
+    );
+    let mut no_trust = config;
+    no_trust.ca = None;
+    assert!(
+        no_trust.connect().await.is_err(),
+        "Racing must not bypass server certificate verification"
+    );
+}
