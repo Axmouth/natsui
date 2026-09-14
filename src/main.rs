@@ -1,10 +1,15 @@
 mod auth;
+mod buckets;
 mod connection;
 mod editing;
 mod incidents;
+mod managed;
 mod messages;
 mod monitoring;
+mod operations;
+mod profiles;
 mod resources;
+mod reviews;
 #[cfg(test)]
 mod security_tests;
 mod simulation;
@@ -45,17 +50,36 @@ struct App {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
-    if args.get(1).map(String::as_str) == Some("--init-auth") {
+    if matches!(
+        args.get(1).map(String::as_str),
+        Some("--init-auth" | "--init-auth-if-missing")
+    ) {
         if args.len() != 3 {
             return Err("Usage: natsui --init-auth PATH".into());
         }
-        auth::initialize(std::path::Path::new(&args[2]))?;
+        if args[1] == "--init-auth-if-missing" {
+            auth::initialize_if_missing(std::path::Path::new(&args[2]))?;
+        } else {
+            auth::initialize(std::path::Path::new(&args[2]))?;
+        }
         println!(
-            "Dashboard access key created. Keep the file private; set NATSUI_AUTH_TOKEN_FILE to its path."
+            "Dashboard access key ready. Keep the file private. Set NATSUI_AUTH_TOKEN_FILE to its path."
         );
         return Ok(());
     }
+    if args.get(1).map(String::as_str) == Some("login") {
+        if args.len() > 2 {
+            return Err("Usage: natsui login".into());
+        }
+        return auth::login_link(
+            std::env::var("NATSUI_PORT")
+                .unwrap_or("4321".into())
+                .parse()?,
+        )
+        .await;
+    }
     let auth = auth::Auth::from_env()?;
+    managed::initialize()?;
     let demo = std::env::args().any(|a| a == "--demo");
     let port: u16 = std::env::var("NATSUI_PORT")
         .unwrap_or("4321".into())
@@ -73,6 +97,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let scope = std::env::var("NATSUI_PROFILE").unwrap_or("Local NATS".into());
     let dir = std::env::var("NATSUI_DATA_DIR").unwrap_or("data".into());
     let db = store::Database::open(&dir)?;
+    auth.open_users(std::path::Path::new(&dir))?;
+    if let Ok(origin) = std::env::var("NATSUI_PUBLIC_URL") {
+        auth.configure_origin(&origin)?;
+    }
     let settings_cache = Arc::new(RwLock::new(db.settings().await?));
     let connection = if demo {
         None
@@ -92,8 +120,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::env::var("NATSUI_ADOPT_LEGACY_PROFILE").as_deref() == Ok("1"),
     )
     .await?;
-    let monitor =
-        monitoring::Monitor::new(&std::env::var("NATSUI_MONITOR_URLS").unwrap_or_default())?;
+    let monitor = monitoring::Monitor::from_env()?;
     if !demo {
         tokio::spawn(monitor.clone().collect());
     }
@@ -132,7 +159,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     tokio::spawn(collect(app.clone()));
     tokio::spawn(incidents::collect(app.clone()));
-    let router = router(app);
+    let router = profiles::router(app, &dir).await?;
     let listener = tokio::net::TcpListener::bind(address).await?;
     println!(
         "natsui: http://{address} ({})",
@@ -154,7 +181,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+#[cfg(test)]
 fn router(app: App) -> Router {
+    application_routes(app.clone())
+        .layer(axum::middleware::from_fn_with_state(
+            app.auth.clone(),
+            auth::guard,
+        ))
+        .layer(axum::middleware::from_fn_with_state(
+            app.auth,
+            network_request,
+        ))
+}
+fn application_routes(app: App) -> Router {
     Router::new()
         .route("/login", get(auth::page))
         .route(
@@ -169,6 +208,95 @@ fn router(app: App) -> Router {
         .route(
             "/api/auth/login",
             axum::routing::post(auth::login).layer(axum::extract::DefaultBodyLimit::max(1024)),
+        )
+        .route(
+            "/api/auth/ticket",
+            axum::routing::post(auth::ticket).layer(axum::extract::DefaultBodyLimit::max(1024)),
+        )
+        .route(
+            "/api/auth/exchange",
+            axum::routing::post(auth::exchange).layer(axum::extract::DefaultBodyLimit::max(1024)),
+        )
+        .route(
+            "/api/users",
+            get(auth::users)
+                .post(auth::create_user)
+                .layer(axum::extract::DefaultBodyLimit::max(2048)),
+        )
+        .route(
+            "/api/users/{id}",
+            axum::routing::post(auth::change_user)
+                .layer(axum::extract::DefaultBodyLimit::max(2048)),
+        )
+        .route("/api/auth/me", get(auth::me))
+        .route(
+            "/managed.js",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/javascript")],
+                    include_str!("../web/managed.js"),
+                )
+            }),
+        )
+        .route("/api/managed", get(managed::nodes))
+        .route("/api/managed/{id}/status", get(managed::status))
+        .route(
+            "/api/managed/{id}/preview",
+            axum::routing::post(managed::preview)
+                .layer(axum::extract::DefaultBodyLimit::max(65536)),
+        )
+        .route(
+            "/api/managed/{id}/apply",
+            axum::routing::post(managed::apply).layer(axum::extract::DefaultBodyLimit::max(2048)),
+        )
+        .route(
+            "/profiles.js",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/javascript")],
+                    include_str!("../web/profiles.js"),
+                )
+            }),
+        )
+        .route(
+            "/api/operations/preview",
+            axum::routing::post(operations::preview)
+                .layer(axum::extract::DefaultBodyLimit::max(131072)),
+        )
+        .route(
+            "/api/operations/apply",
+            axum::routing::post(operations::apply)
+                .layer(axum::extract::DefaultBodyLimit::max(2048)),
+        )
+        .route(
+            "/operations.js",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/javascript")],
+                    include_str!("../web/operations.js"),
+                )
+            }),
+        )
+        .route(
+            "/buckets.js",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/javascript")],
+                    include_str!("../web/buckets.js"),
+                )
+            }),
+        )
+        .route("/api/buckets", get(buckets::buckets))
+        .route("/api/buckets/{kind}/{bucket}", get(buckets::keys))
+        .route("/api/buckets/{kind}/{bucket}/entry", get(buckets::entry))
+        .route(
+            "/access.js",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/javascript")],
+                    include_str!("../web/access.js"),
+                )
+            }),
         )
         .route("/api/auth/logout", axum::routing::post(auth::logout))
         .route(
@@ -273,35 +401,66 @@ fn router(app: App) -> Router {
         )
         .route("/healthz", get(|| async { "ok" }))
         .route("/readyz", get(readiness))
-        .layer(axum::middleware::from_fn_with_state(
-            app.auth.clone(),
-            auth::guard,
-        ))
-        .layer(axum::middleware::from_fn(local_request))
         .with_state(app)
 }
 
-// Loopback binding or a loopback-only container port is the access boundary. Host checks also reject DNS
-// rebinding; mutations require a non-simple header and no cross-origin access.
+#[cfg(test)]
 async fn local_request(request: axum::extract::Request, next: axum::middleware::Next) -> Response {
+    network_request(State(auth::Auth::disabled()), request, next).await
+}
+// The configured origin is authoritative. Forwarded headers never expand the trusted host set.
+async fn network_request(
+    State(auth): State<auth::Auth>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
     let host = request
         .headers()
         .get(header::HOST)
         .and_then(|h| h.to_str().ok())
         .unwrap_or("");
     let name = host.split(':').next().unwrap_or("");
-    if name != "127.0.0.1" && name != "localhost" {
-        return StatusCode::FORBIDDEN.into_response();
-    }
+    let public = auth.origin();
+    let expected = if let Some(url) = &public {
+        let serialized = url.origin().ascii_serialization();
+        let authority = serialized.strip_prefix("https://").unwrap();
+        let local_cli = (name == "localhost" || name == "127.0.0.1")
+            && matches!(
+                request.uri().path(),
+                "/api/auth/ticket" | "/healthz" | "/readyz"
+            );
+        if host != authority && !local_cli {
+            return StatusCode::FORBIDDEN.into_response();
+        }
+        if local_cli {
+            format!("http://{host}")
+        } else {
+            url.origin().ascii_serialization()
+        }
+    } else {
+        if name != "127.0.0.1" && name != "localhost" {
+            return StatusCode::FORBIDDEN.into_response();
+        }
+        format!("http://{host}")
+    };
     if let Some(origin) = request.headers().get(header::ORIGIN)
-        && origin.to_str().ok() != Some(format!("http://{host}").as_str())
+        && origin.to_str().ok() != Some(expected.as_str())
     {
         return StatusCode::FORBIDDEN.into_response();
     }
     let mut response = next.run(request).await;
+    if public.is_some() {
+        response.headers_mut().insert(
+            "strict-transport-security",
+            "max-age=31536000".parse().unwrap(),
+        );
+    }
     response
         .headers_mut()
         .insert(header::CACHE_CONTROL, "no-store".parse().unwrap());
+    response
+        .headers_mut()
+        .insert("referrer-policy", "no-referrer".parse().unwrap());
     response
         .headers_mut()
         .insert("x-content-type-options", "nosniff".parse().unwrap());

@@ -1,0 +1,23 @@
+natsui_directory: /opt/natsui
+natsui_image: ghcr.io/axmouth/natsui:latest
+natsui_project: natsui-managed
+natsui_port: 4321
+natsui_network: existing_nats_network
+natsui_profile: managed-cluster-v1
+natsui_urls:
+  - nats://nats1:4222
+  - nats://nats2:4222
+  - nats://nats3:4222
+natsui_monitor_urls:
+  - http://nats1:8222
+  - http://nats2:8222
+  - http://nats3:8222
+natsui_domain: ''
+natsui_require_ready: true
+
+# These are controller-side source paths. Vault-encrypted files are decrypted by copy.
+natsui_auth_source: vault/dashboard.key
+natsui_creds_source: ''
+natsui_ca_source: ''
+natsui_client_cert_source: ''
+natsui_client_key_source: ''

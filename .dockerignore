@@ -26,3 +26,10 @@
 !demo/README.md
 !demo/published.yaml
 !compose.yaml
+
+!deploy/ansible/
+!deploy/ansible/**
+
+!controller/
+!controller/*.py
+!controller/Dockerfile

@@ -1,0 +1,51 @@
+name: {{ natsui_project | to_json }}
+services:
+  dashboard:
+    image: {{ natsui_image | to_json }}
+    restart: unless-stopped
+    ports:
+      - {{ ('127.0.0.1:' ~ natsui_port ~ ':4321') | to_json }}
+    environment:
+      NATSUI_URL: {{ (natsui_urls | join(',')) | replace('$', '$$') | to_json }}
+      NATSUI_PROFILE: {{ natsui_profile | replace('$', '$$') | to_json }}
+      NATSUI_DOMAIN: {{ natsui_domain | replace('$', '$$') | to_json }}
+      NATSUI_MONITOR_URLS: {{ (natsui_monitor_urls | join(',')) | replace('$', '$$') | to_json }}
+      NATSUI_AUTH_TOKEN_FILE: /run/natsui-auth/access.key
+      NATSUI_ALLOW_WRITES: '0'
+{% if natsui_creds_source | length > 0 %}
+      NATSUI_CREDS: /run/nats/observer.creds
+{% endif %}
+{% if natsui_ca_source | length > 0 %}
+      NATSUI_TLS_CA: /run/nats/ca.pem
+{% endif %}
+{% if natsui_client_cert_source | length > 0 %}
+      NATSUI_TLS_CERT: /run/nats/client.pem
+      NATSUI_TLS_KEY: /run/nats/client.key
+{% endif %}
+    networks: [broker]
+    volumes:
+      - type: bind
+        source: ./data
+        target: /data
+        bind:
+          create_host_path: false
+{% for item in natsui_secret_files if item.source | length > 0 %}
+      - type: bind
+        source: {{ ('./secrets/' ~ item.name) | to_json }}
+        target: {{ item.target | to_json }}
+        read_only: true
+        bind:
+          create_host_path: false
+{% endfor %}
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    mem_limit: 512m
+    pids_limit: 128
+    logging:
+      driver: json-file
+      options: {max-size: 5m, max-file: '2'}
+networks:
+  broker:
+    external: true
+    name: {{ natsui_network | to_json }}

@@ -96,9 +96,9 @@ Use a dedicated restricted NATS identity. [Security and permissions](SECURITY.md
 
 The image stores SQLite in `/data`. **Mount the whole directory** with `-v natsui-data:/data`. Mounting only the database file omits SQLite's WAL/SHM companions. Named volumes survive container replacement. A volume is not a backup, and `docker compose down -v` deletes non-external project volumes.
 
-`NATSUI_AUTH_TOKEN_FILE` enables an access-key login with eight-hour sessions and sign-out. `natsui --init-auth PATH` securely generates the key file without overwriting an existing file. Store it in a separate read-only mount. Missing or malformed configured keys stop startup. An unset variable retains trusted local access. This is single-operator authentication, not individual accounts or roles, and it does not enable public HTTP exposure.
+`NATSUI_AUTH_TOKEN_FILE` enables access-key login with eight-hour sessions. The authenticated Compose recipe initializes its bootstrap key once. `natsui login` prints a one-time login link. Settings can create named viewer, operator and admin identities. Keys remain independent of NATS credentials. [Shared access and HTTPS](docs/SHARED_ACCESS.md) covers roles, recovery keys and trusted reverse proxies.
 
-The [Pages setup guide](https://axmouth.github.io/natsui/setup.html) covers cluster network discovery, multiple monitoring hosts, authenticated Docker startup, JWT credentials and mutual TLS with downloadable Compose files. [Detailed setup, volume ownership, backup and restore](docs/SETUP.md) includes exact commands, read-only credential mounts, connection checks and key rotation. The one-command cluster tryout remains an explicitly unauthenticated local demo.
+The [Pages setup guide](https://axmouth.github.io/natsui/setup.html) covers cluster network discovery, multiple monitoring hosts, authenticated Docker startup, JWT credentials and mutual TLS with downloadable Compose files. [Detailed setup, volume ownership, backup and restore](docs/SETUP.md) includes exact commands, read-only credential mounts, connection checks and key rotation. The one-command cluster tryout remains an explicitly unauthenticated local demo. [Ansible deployment](docs/ANSIBLE.md) covers unattended provisioning with Vault, persistent host storage and explicit rotation.
 
 ## A demo without a backend
 
@@ -135,5 +135,7 @@ The [porting ledger](PORTING_LEDGER.md) records which Fibril ideas were adapted,
 Inspired by [Fibril](https://github.com/Axmouth/fibril), with its theme collection and incident-oriented interface as the starting point. Original MIT attribution is preserved in [LICENSE](LICENSE). Natsui uses its own pixel kitten favicon and is an independent project, not an official NATS project.
 
 ### Reviewed configuration editing
+
+Operations provides reviewed stream/consumer creation and deletion plus explicit Core or JetStream publishing. Buckets provides non-consuming Key Value inspection and Object Store metadata. [Multiple profiles](docs/PROFILES.md), [secured monitoring](docs/MONITORING_SECURITY.md) and [optional managed NATS users/settings](docs/MANAGED.md) have dedicated deployment guides.
 
 Settings includes stream storage limits, capture subjects, discard behavior, replica count and consumer acknowledgment/retry controls. Connections remain read-only unless started with `NATSUI_ALLOW_WRITES=1` and suitable NATS permissions. Changes have a before/after preview, stale-configuration checks, readback verification and an Activity record. Live edits require NATS 2.11+ in the 2.x series. [Settings and boundaries](SETTINGS_AND_ACCESS.md#implemented-jetstream-editor).

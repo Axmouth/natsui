@@ -4,13 +4,14 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import './build-site.mjs';
 const root=path.resolve(fileURLToPath(new URL('../dist-site/',import.meta.url)));
-for(const name of ['index.html','setup.html','demo/index.html']){
+for(const name of ['index.html','setup.html','ansible.html','shared-access.html','monitoring-security.html','profiles.html','managed.html','demo/index.html']){
  const file=path.join(root,name),html=await readFile(file,'utf8');
  for(const [,url] of html.matchAll(/(?:src|href)="([^"]+)"/g)){
-  if(/^(https?:|#)/.test(url))continue;
+  if(/^https?:/.test(url))continue;
   assert.ok(!url.startsWith('/'),`${name}: absolute asset path would escape the Pages project`);
-  let target=path.resolve(path.dirname(file),url.split('#')[0]);if(url.split('#')[0].endsWith('/'))target=path.join(target,'index.html');
+  let target=url.startsWith('#')?file:path.resolve(path.dirname(file),url.split('#')[0]);if(url.split('#')[0].endsWith('/'))target=path.join(target,'index.html');
   assert.ok((await stat(target)).isFile(),`${name}: missing ${url}`);
+  const fragment=url.split('#')[1];if(fragment&&target.endsWith('.html')&&!name.startsWith('demo/'))assert.ok((await readFile(target,'utf8')).includes(`id="${fragment}"`),`${name}: missing fragment ${url}`);
  }
 }
 const html=await readFile(path.join(root,'demo/index.html'),'utf8');

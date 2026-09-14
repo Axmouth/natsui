@@ -7,18 +7,16 @@ use axum::{
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use std::{
-    collections::BTreeMap,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{collections::BTreeMap, sync::Arc, time::Duration};
 use tokio::sync::Mutex;
 
 type Error = (StatusCode, String);
 #[derive(Clone, Default)]
 pub struct Editor {
     pub allowed: bool,
-    pending: Arc<Mutex<Option<Preview>>>,
+    pub mutation: Arc<Mutex<()>>,
+    pub operation_pending: Arc<crate::reviews::Reviews<crate::operations::Preview>>,
+    pending: Arc<crate::reviews::Reviews<Preview>>,
 }
 impl Editor {
     pub fn new(allowed: bool) -> Self {
@@ -29,8 +27,6 @@ impl Editor {
     }
 }
 struct Preview {
-    token: String,
-    expires: Instant,
     target: Target,
     revision: String,
     config: Value,
@@ -149,7 +145,7 @@ fn revision(v: &Value) -> String {
     )
 }
 // The editor targets 2.11+ so update-only consumer requests cannot fall back to creation.
-fn supported(version: &str) -> bool {
+pub(crate) fn supported(version: &str) -> bool {
     let mut v = version
         .trim_start_matches('v')
         .split('.')
@@ -370,8 +366,10 @@ fn candidate(
     }
     Ok((config, changes, warnings))
 }
-pub async fn capabilities(State(app): State<App>) -> Json<Value> {
-    Json(json!({"enabled":app.editor.allowed && !app.demo,"demo":app.demo,"profile":app.scope}))
+pub async fn capabilities(State(app): State<App>, headers: HeaderMap) -> Json<Value> {
+    Json(
+        json!({"enabled":app.editor.allowed && !app.demo && app.auth.role(&headers)!=Some(crate::auth::Role::Viewer),"demo":app.demo,"profile":app.scope}),
+    )
 }
 pub async fn read(
     State(app): State<App>,
@@ -409,17 +407,19 @@ pub async fn preview(
     }
     let (config, changes, warnings) =
         candidate(&proposal.target, &current["config"], &proposal.changes)?;
-    let token = client.new_inbox();
-    let result = json!({"token":token,"changes":changes,"warnings":warnings,"expires_seconds":120});
-    *app.editor.pending.lock().await = Some(Preview {
-        token,
-        expires: Instant::now() + Duration::from_secs(120),
-        target: proposal.target,
-        revision: proposal.revision,
-        config,
-        changes,
-        warnings,
-    });
+    let mut result = json!({"changes":changes,"warnings":warnings,"expires_seconds":120});
+    let token = app.editor.pending.insert(
+        app.auth.review_owner(&headers),
+        Preview {
+            target: proposal.target,
+            revision: proposal.revision,
+            config,
+            changes,
+            warnings,
+        },
+        Duration::from_secs(120),
+    )?;
+    result["token"] = token.into();
     Ok(Json(result))
 }
 pub async fn apply(
@@ -428,24 +428,12 @@ pub async fn apply(
     Json(approval): Json<Approval>,
 ) -> Result<Json<Value>, Error> {
     writable(&app, &headers)?;
-    // One in-flight mutation per dashboard prevents local requests from interleaving.
-    let mut pending = app.editor.pending.lock().await;
-    let p = pending.as_ref().ok_or_else(|| {
-        error(
-            StatusCode::CONFLICT,
-            "Preview expired or already used. Review again.",
-        )
-    })?;
-    if p.token != approval.token || p.expires < Instant::now() {
-        return Err(error(
-            StatusCode::CONFLICT,
-            "Preview expired or superseded. Review again.",
-        ));
-    }
-    if !p.warnings.is_empty() && !approval.accept_warnings {
-        return Err(bad("Acknowledge the change warnings first"));
-    }
-    let p = pending.take().unwrap();
+    let _mutation = app.editor.mutation.lock().await;
+    let p = app.editor.pending.take(
+        &approval.token,
+        &app.auth.review_owner(&headers),
+        |preview| preview.warnings.is_empty() || approval.accept_warnings,
+    )?;
     let client = client(&app).await?;
     if !supported(&client.server_info().version) {
         return Err(bad(
@@ -459,7 +447,7 @@ pub async fn apply(
             "Configuration changed since preview. Reload and review again.",
         ));
     }
-    let event = |outcome: &str| json!({"at":telemetry::now(),"kind":"configuration","resource":p.target.kind,"stream":p.target.stream,"name":p.target.name(),"source":"local operator","operation":p.token,"changes":p.changes,"detail":format!("Natsui configuration edit: {outcome}")});
+    let event = |outcome: &str| json!({"at":telemetry::now(),"kind":"configuration","resource":p.target.kind,"stream":p.target.stream,"name":p.target.name(),"source":app.auth.actor(&headers),"operation":approval.token,"changes":p.changes,"detail":format!("Natsui configuration edit: {outcome}")});
     app.db
         .incidents(&app.scope, false, vec![event("attempt recorded")])
         .await

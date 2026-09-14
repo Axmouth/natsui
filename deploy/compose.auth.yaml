@@ -1,7 +1,17 @@
 name: natsui-authenticated
 services:
+  initialize:
+    image: ghcr.io/axmouth/natsui:latest
+    command: ['--init-auth-if-missing', '/data/access.key']
+    volumes: ['auth:/data']
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    network_mode: none
   dashboard:
     image: ghcr.io/axmouth/natsui:latest
+    depends_on:
+      initialize: {condition: service_completed_successfully}
     ports: ['127.0.0.1:4321:4321']
     environment:
       NATSUI_URL: ${NATSUI_URL:-nats://host.docker.internal:4222}
@@ -25,5 +35,4 @@ volumes:
   history:
     name: natsui-data
   auth:
-    external: true
     name: natsui-auth

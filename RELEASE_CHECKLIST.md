@@ -11,7 +11,7 @@ This document separates implemented checks from validation that still needs elap
 - Connection/profile mismatch protection and explicit legacy-history adoption.
 - Per-operation storage-health reporting, retained validated settings and bounded logical history storage.
 - Liveness and readiness endpoints, local concurrency check and configurable endurance recorder.
-- CI definition for Windows, Linux and macOS artifacts; full Linux container verification target.
+- CI definition for Windows, Linux and macOS artifacts. full Linux container verification target.
 
 ## Evidence recorded locally
 
@@ -25,21 +25,21 @@ Verified on 2026-09-12:
 - Eight simultaneous local readers completed 120 requests without errors. The recorded Linux-container run took 118 ms total, with 20 ms p95 and 44 ms maximum request latency. This is a small local check, not a production capacity benchmark.
 - One Linux dashboard resource sample showed 14.63 MiB resident container memory and 0.02% CPU. Endurance evidence is required before drawing conclusions about sustained overhead.
 - The packaged Windows release opened the existing real-cluster workspace after explicit legacy adoption. A stopped-process SQLite backup passed quick_check and retained 2,456 samples. Browser inspection confirmed the preserved node view and healthy 3/3 monitoring coverage.
-- The short Linux endurance-recorder smoke test completed without readiness failures. A separate 24-hour Windows run started at 2026-09-12 00:43:45 UTC and writes data/soak/beta-24h.jsonl plus its summary. The recording was subsequently interrupted. Its 279 observations include one unavailable collection and long observation gaps; it does not establish a continuous 24-hour pass.
+- The short Linux endurance-recorder smoke test completed without readiness failures. A separate 24-hour Windows run started at 2026-09-12 00:43:45 UTC and writes data/soak/beta-24h.jsonl plus its summary. The recording was subsequently interrupted. Its 279 observations include one unavailable collection and long observation gaps. it does not establish a continuous 24-hour pass.
 
-NATS Server 2.11.8 is a compatibility test baseline, not a claim that it is the latest or recommended server patch. The password-based restricted identity and mutual TLS cases were exercised; operator-issued JWT/account policy combinations still need deployment-specific validation.
+NATS Server 2.11.8 is a compatibility test baseline, not a claim that it is the latest or recommended server patch. The password-based restricted identity and mutual TLS cases were exercised. operator-issued JWT/account policy combinations still need deployment-specific validation.
 
 ## Before publication
 
-- Complete and review a 24-hour endurance report; a started or short run is not a completed soak.
+- Complete and review a 24-hour endurance report. a started or short run is not a completed soak.
 - Run the prepared CI workflow on a chosen GitHub repository. macOS and additional native architectures require successful runner results before support claims.
-- Source repository: https://github.com/Axmouth/natsui. Release-binary distribution and public demo hosting remain separate publication steps.
+- Source repository: https://github.com/Axmouth/natsui. The repository publication workflow produces images and the Pages demo after verification. This working-tree increment has not yet been published.
 - Have fresh users follow the quick start and investigate actual operational questions. Record installation failures and confusing evidence semantics.
 - Review broker compatibility beyond the tested baseline, including deployment-specific account/JWT policies.
 
 ## Deferred beyond the local beta
 
-Individual accounts, roles, public HTTP exposure, resource creation/deletion, server configuration editing and restart supervision remain separate capabilities. Optional access-key login is implemented for local operator access. Native stream and consumer configuration editing is opt-in for local operator use; default connections remain read-only.
+Per-profile authorization, separate payload grants, OIDC and JWT operator management remain separate extensions. Named access-key identities, explicit HTTPS proxy deployment, reviewed native resource operations and an opt-in controller are implemented. The controller does not perform coordinated cluster rollout or claim quorum safety.
 
 ## Publishing
 
@@ -48,9 +48,18 @@ Individual accounts, roles, public HTTP exposure, resource creation/deletion, se
 
 ## Authentication and persistent deployment increment
 
-- Generated access-key files fail closed when configured incorrectly; generation refuses overwrite.
+- Generated access-key files fail closed when configured incorrectly. generation refuses overwrite.
 - Session expiry/revocation, login body and rate limits, and protection of read/write APIs are covered by Rust tests.
 - The Pages setup guide and authenticated Compose download are included in static-site link checks.
 - Docker auth/storage smoke verification passed: key initialization as UID 10001, separate secret mount, protected API reads, logout, replacement session invalidation, retained settings/history and fresh-volume restore.
 - Windows and Linux: all 30 Rust tests passed, including disposable real-broker TLS/permission/editing checks. Windows Clippy and Linux release packaging passed.
-- Browser: invalid key, successful sign-in and corrected sign-out redirect were verified. Public publication follows the verification workflow; these local checks do not claim that the new commit is already deployed.
+- Browser: invalid key, successful sign-in and corrected sign-out redirect were verified. Public publication follows the verification workflow. these local checks do not claim that the new commit is already deployed.
+
+## Shared deployment verification, 2026-09-14
+
+- Ansible initial deployment, unchanged second run, key rotation, container recreation and preserved history were verified against disposable Docker services.
+- Windows unit suite: 39 passed and six real-broker cases skipped locally. The full Linux suite passed all 45 tests with disposable NATS brokers. Windows and Linux release archives were generated successfully.
+- Controller Docker tests passed against its real NATS child, including HTTPS token access, stalled-handshake isolation, reload/restart, credential rotation, owned reviews and unexpected process exit.
+- Native monitoring integration passed for private CA, mTLS, Basic/Bearer isolation, missing credentials, untrusted certificates and redirect rejection.
+- The UI route contract checks literal calls against registered backend routes. It complements browser checks and does not verify response shapes or browser behavior.
+- The durable browser regression passed against the final runtime and a fresh authenticated cluster. It covers one-time login, per-tab profiles, isolated settings, create/publish/delete operations, named viewer restrictions and recovery when only the default profile remains. CI includes this workflow. A completed short test does not qualify as a 24-hour run.

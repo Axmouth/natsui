@@ -2,6 +2,14 @@
 
 The dashboard runs beside an existing NATS server. SQLite is embedded. No database service is required. The [hosted setup guide](https://axmouth.github.io/natsui/setup.html) includes the same startup path. The disposable cluster demo remains unauthenticated on host loopback. This guide configures a separate authenticated dashboard.
 
+## Extended deployment options
+
+[Shared dashboard users and HTTPS](SHARED_ACCESS.md), [monitoring certificates and credentials](MONITORING_SECURITY.md), [multiple profiles](PROFILES.md) and [optional managed NATS users/settings](MANAGED.md) have dedicated guides. The local demo remains unauthenticated. Explicit configuration enables each production capability.
+
+## Ansible deployment
+
+The [Ansible guide](ANSIBLE.md) includes a playbook for Vault-backed dashboard credentials, optional NATS/TLS files, persistent storage, change-triggered recreation, readiness checks and SSH-tunneled access. Deployment is non-interactive once automation credentials are configured.
+
 ## Docker with an existing broker
 
 The commands below use Docker Desktop with Linux containers or Docker Engine. NATS_NETWORK and NATS_SERVICE are placeholders for an existing private Docker network and broker service name. The broker must be reachable from that network. A dedicated restricted NATS identity is described in [SECURITY.md](../SECURITY.md).
@@ -24,9 +32,9 @@ Start the dashboard with separate mounts for history and the read-only secret:
 docker run -d --name natsui --network NATS_NETWORK -p 127.0.0.1:4321:4321 -e NATSUI_URL=nats://NATS_SERVICE:4222 -e NATSUI_PROFILE=production-observer -e NATSUI_AUTH_TOKEN_FILE=/run/natsui-auth/access.key -v natsui-data:/data -v natsui-auth:/run/natsui-auth:ro --read-only --cap-drop ALL --security-opt no-new-privileges:true ghcr.io/axmouth/natsui:latest
 ```
 
-Open http://127.0.0.1:4321 and enter the access key. Native NATS credentials and TLS files use separate read-only mounts. An unauthenticated broker is not required. Add NATSUI_CREDS or supported URL credentials for the target deployment. NATSUI_MONITOR_URLS is optional and independent of broker authentication. NATSUI_ALLOW_WRITES defaults to 0. Enabling reviewed edits also requires suitable NATS permissions.
+Run docker exec natsui natsui login and open its one-time link within 60 seconds, or open http://127.0.0.1:4321 and enter the access key. Native NATS credentials and TLS files use separate read-only mounts. An unauthenticated broker is not required. Add NATSUI_CREDS or supported URL credentials for the target deployment. NATSUI_MONITOR_URLS is optional and independent of broker authentication. NATSUI_ALLOW_WRITES defaults to 0. Enabling reviewed edits also requires suitable NATS permissions.
 
-A Compose alternative for a broker reachable through host.docker.internal is available as [compose.auth.yaml](../deploy/compose.auth.yaml). It uses the same natsui-auth and natsui-data volumes. The natsui-auth volume must first be initialized by the generation command above. NATSUI_URL can override the default broker address. A broker bound only to host loopback may not be reachable through the Docker gateway. The shared private network example above avoids that limitation.
+A Compose alternative for a broker reachable through host.docker.internal is available as [compose.auth.yaml](../deploy/compose.auth.yaml). It uses the same natsui-auth and natsui-data volumes. The Compose initializer creates and validates the key in natsui-auth automatically. It preserves an existing valid key and refuses invalid files. NATSUI_URL can override the default broker address. A broker bound only to host loopback may not be reachable through the Docker gateway. The shared private network example above avoids that limitation.
 
 ## Connect a Docker cluster, step by step
 
@@ -335,6 +343,8 @@ Subsequent starts reuse the existing key. Read its file locally for sign-in and 
 
 ## Login behavior
 
+Named dashboard users, roles and one-time login links are described in the [shared-access guide](SHARED_ACCESS.md). The configured key is a recovery administrator.
+
 - NATSUI_AUTH_TOKEN_FILE enables a single-operator access-key login. An unset variable retains trusted local access. An empty, unreadable or malformed configured file fails startup.
 - --init-auth generates 256 random bits encoded as 64 hexadecimal characters. It does not create a human password or a NATS credential. The process retains a SHA-256 digest for comparison, not the raw access key.
 - Sign-in creates an HttpOnly, SameSite=Strict cookie. Sessions expire after eight hours, are revoked by Sign out, and are all invalidated by a process restart. At most 32 sessions are retained. The oldest is evicted when full.
@@ -359,7 +369,7 @@ The image sets NATSUI_DATA_DIR=/data. The native binary defaults to ./data relat
 | Deployment | Persistent mount | Lifecycle |
 | --- | --- | --- |
 | Docker run above | natsui-data:/data | Survives container stop, removal and replacement while the named volume remains |
-| Authenticated Compose example | natsui-data:/data | Same stable named volume. Authentication uses a separate external volume |
+| Authenticated Compose example | natsui-data:/data | Same stable named volume. Authentication uses a separate stable named volume |
 | Root compose.yaml | Project-prefixed dashboard-data volume | Reuse the same Compose project name and file to retain the same history |
 | Published cluster demo | Tryout project's dashboard-data plus three broker volumes | down retains volumes. `down -v` deletes demo history and broker storage |
 | Native binary | NATSUI_DATA_DIR or ./data | Use a stable absolute directory when launching from different working directories |
@@ -393,4 +403,4 @@ docker run --rm --user 0 --entrypoint tar -v natsui-restored-data:/data --mount 
 
 Start a replacement dashboard with -v natsui-restored-data:/data, the same NATS identity/profile, and the original image version or a documented compatible upgrade. Use a different container name and loopback port for a restore drill. Check /readyz, sign in, and inspect settings and history before replacing the original instance. Newer database schemas may not open in older binaries. Keep a stopped-process backup before upgrades. Pin image versions or digests when repeatable restores matter.
 
-For Compose deployments, inspect the dashboard's /data mount with docker inspect before choosing a volume name. Docker compose down preserves named volumes. `docker compose down -v` removes non-external volumes. The external auth volume in the authenticated example is retained, but its history volume is removed by down -v. Native backups follow the same stop/copy-complete-directory/restart procedure.
+For Compose deployments, inspect the dashboard's /data mount with docker inspect before choosing a volume name. Docker compose down preserves named volumes. `docker compose down -v` removes non-external volumes. The authenticated example uses named auth and history volumes. Both can be removed by down -v, so backups must cover their separate recovery requirements. Native backups follow the same stop/copy-complete-directory/restart procedure.

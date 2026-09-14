@@ -781,6 +781,7 @@ version = "0.1.0"
 dependencies = [
  "async-nats",
  "axum",
+ "base64",
  "futures-util",
  "getrandom 0.4.3",
  "percent-encoding",

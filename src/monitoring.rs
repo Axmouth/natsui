@@ -4,11 +4,158 @@ use tokio::sync::RwLock;
 
 #[derive(Clone)]
 pub struct Monitor {
-    client: reqwest::Client,
+    clients: Vec<reqwest::Client>,
+    credentials: Vec<HttpCredentials>,
     urls: Vec<reqwest::Url>,
     pub current: Arc<RwLock<Value>>,
 }
+#[derive(Clone, Default)]
+enum HttpCredentials {
+    #[default]
+    None,
+    Basic(String, String),
+    Bearer(String),
+}
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Endpoint {
+    url: String,
+    ca_file: Option<String>,
+    cert_file: Option<String>,
+    key_file: Option<String>,
+    username: Option<String>,
+    password_file: Option<String>,
+    bearer_file: Option<String>,
+}
+fn private_file(path: &str, limit: u64) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    use std::io::Read;
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)
+        .map_err(|_| "Monitoring configuration file unavailable")?
+        .take(limit + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.is_empty() || bytes.len() as u64 > limit {
+        return Err("Monitoring configuration file is empty or oversized".into());
+    }
+    Ok(bytes)
+}
+fn secret(path: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let bytes = private_file(path, 8192)?;
+    let value = String::from_utf8(bytes)
+        .map_err(|_| "Monitoring credential must be UTF-8")?
+        .trim_end_matches(['\r', '\n'])
+        .to_owned();
+    if value.is_empty() || value.chars().any(char::is_control) {
+        return Err("Invalid monitoring credential".into());
+    }
+    Ok(value)
+}
+fn http_client() -> reqwest::ClientBuilder {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(3))
+        .connect_timeout(Duration::from_secs(2))
+        .redirect(reqwest::redirect::Policy::none())
+        .no_proxy()
+}
 impl Monitor {
+    pub fn from_file(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        Self::configured(&private_file(path, 65536)?)
+    }
+    pub fn from_env() -> Result<Self, Box<dyn std::error::Error>> {
+        let urls = std::env::var("NATSUI_MONITOR_URLS").unwrap_or_default();
+        match std::env::var("NATSUI_MONITOR_CONFIG_FILE") {
+            Ok(path) => {
+                if !urls.trim().is_empty() {
+                    return Err(
+                        "Use either NATSUI_MONITOR_URLS or NATSUI_MONITOR_CONFIG_FILE".into(),
+                    );
+                }
+                Self::configured(&private_file(&path, 65536)?)
+            }
+            Err(std::env::VarError::NotPresent) => Self::new(&urls),
+            Err(_) => Err("Invalid NATSUI_MONITOR_CONFIG_FILE".into()),
+        }
+    }
+    fn configured(bytes: &[u8]) -> Result<Self, Box<dyn std::error::Error>> {
+        let endpoints: Vec<Endpoint> = serde_json::from_slice(bytes)
+            .map_err(|_| "Invalid monitoring endpoint configuration")?;
+        if endpoints.is_empty() || endpoints.len() > 32 {
+            return Err("Configure between 1 and 32 monitoring endpoints".into());
+        }
+        let mut monitor = Self::new("")?;
+        for endpoint in endpoints {
+            let urls = parse_urls(&endpoint.url)?;
+            if urls.len() != 1 {
+                return Err("Each monitoring entry must specify one origin".into());
+            }
+            let url = urls.into_iter().next().unwrap();
+            let has_tls = endpoint.ca_file.is_some()
+                || endpoint.cert_file.is_some()
+                || endpoint.key_file.is_some();
+            let has_auth = endpoint.username.is_some()
+                || endpoint.password_file.is_some()
+                || endpoint.bearer_file.is_some();
+            if (has_tls || has_auth) && url.scheme() != "https" {
+                return Err("Monitoring TLS settings and credentials require HTTPS".into());
+            }
+            if endpoint.cert_file.is_some() != endpoint.key_file.is_some() {
+                return Err(
+                    "Monitoring client certificate and key must be configured together".into(),
+                );
+            }
+            if endpoint.username.is_some() != endpoint.password_file.is_some()
+                || (endpoint.bearer_file.is_some() && endpoint.username.is_some())
+            {
+                return Err(
+                    "Configure a monitoring username and password file, or a bearer file".into(),
+                );
+            }
+            let mut client = http_client();
+            if let Some(path) = endpoint.ca_file {
+                let roots = reqwest::Certificate::from_pem_bundle(&private_file(&path, 1048576)?)
+                    .map_err(|_| "Invalid monitoring CA bundle")?;
+                if roots.is_empty() {
+                    return Err("Monitoring CA bundle has no certificates".into());
+                }
+                for root in roots {
+                    client = client.add_root_certificate(root);
+                }
+            }
+            if let (Some(cert), Some(key)) = (endpoint.cert_file, endpoint.key_file) {
+                let mut pem = private_file(&cert, 1048576)?;
+                pem.push(b'\n');
+                pem.extend(private_file(&key, 1048576)?);
+                client = client.identity(
+                    reqwest::Identity::from_pem(&pem)
+                        .map_err(|_| "Invalid monitoring client identity")?,
+                );
+            }
+            let credentials = if let Some(path) = endpoint.bearer_file {
+                HttpCredentials::Bearer(secret(&path)?)
+            } else if let (Some(username), Some(path)) = (endpoint.username, endpoint.password_file)
+            {
+                if username.is_empty()
+                    || username.contains(':')
+                    || username.chars().any(char::is_control)
+                {
+                    return Err("Invalid monitoring username".into());
+                }
+                HttpCredentials::Basic(username, secret(&path)?)
+            } else {
+                HttpCredentials::None
+            };
+            monitor.urls.push(url);
+            monitor.clients.push(
+                client
+                    .build()
+                    .map_err(|_| "Monitoring HTTP client configuration failed")?,
+            );
+            monitor.credentials.push(credentials);
+        }
+        monitor.current = Arc::new(RwLock::new(json!({"status":"connecting","nodes":[]})));
+        Ok(monitor)
+    }
+
     pub async fn inventory(&self, kind: &str, page: usize) -> Result<Value, String> {
         if !["connections", "subscriptions"].contains(&kind) || page > 10000 {
             return Err("Unsupported inventory or page".into());
@@ -50,12 +197,8 @@ impl Monitor {
             "connecting"
         };
         Ok(Self {
-            client: reqwest::Client::builder()
-                .timeout(Duration::from_secs(3))
-                .connect_timeout(Duration::from_secs(2))
-                .redirect(reqwest::redirect::Policy::none())
-                .no_proxy()
-                .build()?,
+            clients: vec![http_client().build()?; urls.len()],
+            credentials: vec![HttpCredentials::None; urls.len()],
             urls,
             current: Arc::new(RwLock::new(json!({"status":status,"nodes":[]}))),
         })
@@ -63,9 +206,13 @@ impl Monitor {
     async fn get(&self, index: usize, path: &str) -> Result<Value, String> {
         let base = self.urls.get(index).ok_or("Unknown monitoring endpoint")?;
         let url = base.join(path).map_err(|_| "Invalid monitoring path")?;
-        let mut response = self
-            .client
-            .get(url)
+        let request = self.clients[index].get(url);
+        let request = match &self.credentials[index] {
+            HttpCredentials::None => request,
+            HttpCredentials::Basic(user, password) => request.basic_auth(user, Some(password)),
+            HttpCredentials::Bearer(token) => request.bearer_auth(token),
+        };
+        let mut response = request
             .send()
             .await
             .map_err(|_| "Monitoring endpoint unavailable")?
@@ -332,6 +479,27 @@ fn project_node(v: &Value, slot: usize, at: u64) -> Value {
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn endpoint_security_is_explicit_and_fails_closed() {
+        for config in [
+            r#"[]"#,
+            r#"[{"url":"https://localhost","password":"secret"}]"#,
+            r#"[{"url":"http://localhost","bearer_file":"missing"}]"#,
+            r#"[{"url":"https://localhost","cert_file":"missing"}]"#,
+            r#"[{"url":"https://localhost","username":"observer"}]"#,
+            r#"[{"url":"https://localhost","ca_file":"missing"}]"#,
+            r#"[{"url":"https://user:secret@localhost"}]"#,
+        ] {
+            assert!(super::Monitor::configured(config.as_bytes()).is_err());
+        }
+        let monitor = super::Monitor::configured(
+            br#"[{"url":"https://localhost:8222"},{"url":"http://localhost:8223"}]"#,
+        )
+        .unwrap();
+        assert_eq!(monitor.clients.len(), 2);
+        assert_eq!(monitor.credentials.len(), 2);
+    }
+
     use super::*;
     #[tokio::test]
     async fn http_collection_is_bounded_and_failure_is_independent() {

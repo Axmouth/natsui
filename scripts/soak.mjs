@@ -11,6 +11,8 @@ const interval=Number(process.env.NATSUI_SOAK_INTERVAL||30);
 if(!Number.isFinite(duration)||duration<=0||!Number.isFinite(interval)||interval<1)throw new Error('Invalid duration or interval');
 const file=resolve(process.env.NATSUI_SOAK_FILE||`data/soak/${new Date().toISOString().replaceAll(':','-')}.jsonl`);
 mkdirSync(dirname(file),{recursive:true});
+const container=process.env.NATSUI_SOAK_CONTAINER;
+if(container&&!/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/.test(container))throw new Error('Invalid container identity');
 const processId=process.env.NATSUI_SOAK_PID;
 if(processId&&!/^\d+$/.test(processId))throw new Error('Invalid process ID');
 const started=Date.now(),summary={started_at:new Date(started).toISOString(),requested_seconds:duration,samples:0,failures:0,partial:0,max_latency_ms:0,complete:false};
@@ -37,6 +39,15 @@ while(!stopped) {
    row.dashboard_rss_bytes=metrics.WorkingSet64;row.dashboard_cpu_seconds=metrics.CPU;row.dashboard_process_started=metrics.StartTime;
    summary.max_dashboard_rss_bytes=Math.max(summary.max_dashboard_rss_bytes||0,metrics.WorkingSet64);
   }catch {row.process_metrics='unavailable';}
+ }
+ if(container) {
+  try {
+   const stats=JSON.parse(execFileSync('docker',['stats','--no-stream','--format','{{json .}}',container],{encoding:'utf8',windowsHide:true,timeout:10000,stdio:['ignore','pipe','ignore']}));
+   const used=stats.MemUsage.split('/')[0].trim().match(/^([\d.]+)(B|KiB|MiB|GiB)$/);
+   row.dashboard_container=container;
+   row.dashboard_cpu_percent=Number.parseFloat(stats.CPUPerc);
+   if(used){row.dashboard_memory_bytes=Number(used[1])*({B:1,KiB:1024,MiB:1048576,GiB:1073741824}[used[2]]);summary.max_dashboard_memory_bytes=Math.max(summary.max_dashboard_memory_bytes||0,row.dashboard_memory_bytes);}
+  }catch {row.container_metrics='unavailable';}
  }
  appendFileSync(file,JSON.stringify(row)+'\n');summary.samples++;
  summary.elapsed_seconds=Math.round((Date.now()-started)/1000);

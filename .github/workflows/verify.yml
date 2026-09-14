@@ -32,6 +32,7 @@ jobs:
           cargo fmt --check
           cargo clippy --locked --all-targets -- -D warnings
           cargo test --locked -- --include-ignored
+          node scripts/test-ui-contract.mjs
           node scripts/test-trends.mjs
           node scripts/test-demo.mjs
           for file in web/*.js scripts/*.mjs; do node --check "$file"; done
@@ -39,6 +40,7 @@ jobs:
         shell: bash
         run: |
           cargo build --release --locked
+          node scripts/smoke-monitor-security.mjs target/release/natsui${{ runner.os == 'Windows' && '.exe' || '' }}
           node scripts/package.mjs
           node scripts/test-site.mjs
       - uses: actions/upload-artifact@v4
@@ -66,8 +68,25 @@ jobs:
           done
           docker logs natsui-ci
           exit 1
+      - name: Browser regression against an authenticated disposable cluster
+        run: |
+          npm install --no-save --package-lock=false playwright@1.62.1
+          npx playwright install --with-deps chromium
+          docker build -t natsui-traffic:ci demo
+          node scripts/smoke-browser-stack.mjs natsui:ci natsui-traffic:ci
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-check
+          path: data/browser-check/
       - name: Cleanup
         if: always()
         run: |
           docker rm -f natsui-ci || true
           docker volume rm natsui-ci-data || true
+
+  controller:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --target verification -t natsui-controller:verified controller

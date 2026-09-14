@@ -1,0 +1,152 @@
+- name: Deploy a protected Natsui dashboard
+  hosts: natsui
+  become: true
+  gather_facts: false
+  vars_files:
+    - settings.yml
+  vars:
+    natsui_secret_files:
+      - {source: '{{ natsui_auth_source }}', name: dashboard.key, target: /run/natsui-auth/access.key}
+      - {source: '{{ natsui_creds_source }}', name: observer.creds, target: /run/nats/observer.creds}
+      - {source: '{{ natsui_ca_source }}', name: ca.pem, target: /run/nats/ca.pem}
+      - {source: '{{ natsui_client_cert_source }}', name: client.pem, target: /run/nats/client.pem}
+      - {source: '{{ natsui_client_key_source }}', name: client.key, target: /run/nats/client.key}
+  tasks:
+    - name: Validate deployment settings
+      ansible.builtin.assert:
+        that:
+          - natsui_directory is match('^/[a-zA-Z0-9_/-]+$')
+          - natsui_directory != '/'
+          - natsui_project is match('^[a-z0-9][a-z0-9_-]+$')
+          - natsui_port | int > 0
+          - natsui_port | int < 65536
+          - natsui_urls | length > 0
+          - natsui_urls | length <= 32
+          - natsui_monitor_urls | length <= 32
+          - natsui_network | length > 0
+          - natsui_auth_source | length > 0
+          - (natsui_client_cert_source | length > 0) == (natsui_client_key_source | length > 0)
+      no_log: true
+
+    - name: Validate the supplied dashboard key before changing the deployment
+      ansible.builtin.assert:
+        that:
+          - lookup('ansible.builtin.file', natsui_auth_source) | trim is match('^[0-9a-fA-F]{64}$')
+        fail_msg: Dashboard key must contain exactly 64 hexadecimal characters.
+      no_log: true
+
+    - name: Create the deployment directory
+      ansible.builtin.file:
+        path: '{{ natsui_directory }}'
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Create persistent storage and protected secret directories
+      ansible.builtin.file:
+        path: '{{ natsui_directory }}/{{ item.name }}'
+        state: directory
+        owner: '{{ item.owner }}'
+        group: '10001'
+        mode: '{{ item.mode }}'
+      loop:
+        - {name: data, owner: '10001', mode: '0750'}
+        - {name: secrets, owner: root, mode: '0750'}
+
+    - name: Provision only configured secret and certificate files
+      ansible.builtin.copy:
+        src: '{{ item.source }}'
+        dest: '{{ natsui_directory }}/secrets/{{ item.name }}'
+        owner: root
+        group: '10001'
+        mode: '0640'
+      loop: '{{ natsui_secret_files }}'
+      when: item.source | length > 0
+      no_log: true
+      diff: false
+      notify: Recreate Natsui
+
+    - name: Render the dashboard Compose definition
+      ansible.builtin.template:
+        src: templates/compose.yaml.j2
+        dest: '{{ natsui_directory }}/compose.yaml'
+        owner: root
+        group: root
+        mode: '0600'
+      no_log: true
+      diff: false
+      notify: Recreate Natsui
+
+    - name: Apply changed startup configuration before readiness checks
+      ansible.builtin.meta: flush_handlers
+
+    - name: Ensure the dashboard is running
+      community.docker.docker_compose_v2:
+        project_src: '{{ natsui_directory }}'
+        state: present
+        pull: missing
+        recreate: auto
+        wait: true
+        wait_timeout: 90
+      when: not ansible_check_mode
+      no_log: true
+
+    - name: Verify that the dashboard API requires login
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - --project-directory
+          - '{{ natsui_directory }}'
+          - exec
+          - -T
+          - dashboard
+          - curl
+          - --silent
+          - --output
+          - /dev/null
+          - --write-out
+          - '%{http_code}'
+          - http://127.0.0.1:4321/api/snapshot
+      register: natsui_login_check
+      changed_when: false
+      failed_when: natsui_login_check.rc != 0 or natsui_login_check.stdout != '401'
+      when: not ansible_check_mode
+
+    - name: Verify current broker collection and storage readiness
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - --project-directory
+          - '{{ natsui_directory }}'
+          - exec
+          - -T
+          - dashboard
+          - curl
+          - --fail
+          - --silent
+          - --output
+          - /dev/null
+          - http://127.0.0.1:4321/readyz
+      register: natsui_ready
+      changed_when: false
+      until: natsui_ready.rc == 0
+      retries: 12
+      delay: 5
+      when:
+        - not ansible_check_mode
+        - natsui_require_ready | bool
+
+  handlers:
+    - name: Recreate Natsui
+      community.docker.docker_compose_v2:
+        project_src: '{{ natsui_directory }}'
+        state: present
+        pull: missing
+        recreate: always
+        wait: true
+        wait_timeout: 90
+      when: not ansible_check_mode
+      no_log: true

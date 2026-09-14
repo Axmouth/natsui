@@ -1,7 +1,8 @@
 'use strict';
 const $ = id => document.getElementById(id);
 const staticDemo = globalThis.NATSUI_STATIC_DEMO === true;
-const pages = {nodes:['Nodes','Process resources, traffic and monitoring coverage.'],node:['Node detail','Reported process metrics and recorded trends.'],stream:['Stream detail','Retention, consumer progress and historical trends.'],about:['About','Origins and acknowledgments.'],overview:['Overview','Consumer progress, with the context to understand it.'],streams:['Streams','Stored records, subject capture and retention.'],consumers:['Consumers','Server-side delivery state. No worker polling required.'],messages:['Messages','Inspect what is retained, without taking work.'],activity:['Activity','A small, persistent record of this workspace.'],settings:['Settings','Clear boundaries between the dashboard and the server.'],coverage:['Data coverage','What is reported, what is derived, and what remains unknown.']};
+const activeProfile = sessionStorage.getItem('natsui-profile') || 'default';
+const pages = {operations:["Operations","Reviewed resource changes and explicit test publishing."],buckets:["Buckets","Key Value revisions and Object Store metadata."],nodes:['Nodes','Process resources, traffic and monitoring coverage.'],node:['Node detail','Reported process metrics and recorded trends.'],stream:['Stream detail','Retention, consumer progress and historical trends.'],about:['About','Origins and acknowledgments.'],overview:['Overview','Consumer progress, with the context to understand it.'],streams:['Streams','Stored records, subject capture and retention.'],consumers:['Consumers','Server-side delivery state. No worker polling required.'],messages:['Messages','Inspect what is retained, without taking work.'],activity:['Activity','A small, persistent record of this workspace.'],settings:['Settings','Clear boundaries between the dashboard and the server.'],coverage:['Data coverage','What is reported, what is derived, and what remains unknown.']};
 let data = null, history = [], timer, busy = false, settingsDirty = false, lastOk = 0;
 const recordsState={stream:'',subject:'',request:0,reading:0,pages:[],page:-1,next:null,loading:false};
 const number = value => value == null ? '--' : new Intl.NumberFormat().format(value);
@@ -12,7 +13,7 @@ function currentPage(){ return location.hash.slice(1).split('?')[0] || 'overview
 function filters(){ return new URLSearchParams(location.hash.split('?')[1] || ''); }
 function filterUrl(key,value){ const params=filters(); if(value)params.set(key,value); else params.delete(key); historyReplace(`#${currentPage()}${params.size?'?'+params:''}`); }
 function historyReplace(url){ window.history.replaceState(null,'',url); }
-async function api(path, options){ if(staticDemo)return globalThis.NatsuiDemo.api(path,options);const response=await fetch(path,options); if(response.status===401){location.replace('/login');throw new Error('Sign-in required');} if(!response.ok)throw new Error((await response.text()).slice(0,250)); return response.status===204?null:response.json(); }
+async function api(path, options){ if(staticDemo)return globalThis.NatsuiDemo.api(path,options);const headers=new Headers(options?.headers);headers.set('X-Natsui-Profile',activeProfile);const response=await fetch(path,{...options,headers}); if(response.status===401){location.replace('/login');throw new Error('Sign-in required');} if(!response.ok)throw new Error((await response.text()).slice(0,250)); return response.status===204?null:response.json(); }
 function navigate(){
  const page=pages[currentPage()]?currentPage():'overview';
  document.querySelectorAll('.page').forEach(e=>e.hidden=e.id!==`page-${page}`);

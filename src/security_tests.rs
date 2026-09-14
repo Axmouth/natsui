@@ -396,7 +396,7 @@ async fn reviewed_configuration_edits() {
         )
         .await
         .0,
-        400
+        409
     );
     let mut info = telemetry::request(&admin, "$JS.API.STREAM.INFO.ORDERS".into(), json!({}))
         .await
@@ -573,4 +573,249 @@ async fn concurrent_tls_seeds_recover_without_advertised_peers() {
         no_trust.connect().await.is_err(),
         "Racing must not bypass server certificate verification"
     );
+}
+
+#[tokio::test]
+async fn explicit_https_origin_rejects_spoofed_hosts_and_origins() {
+    use axum::{
+        Router,
+        body::Body,
+        http::{Request, StatusCode},
+        routing::get,
+    };
+    use tower::ServiceExt;
+    let auth = crate::auth::Auth::from_key(&"a".repeat(64)).unwrap();
+    auth.configure_origin("https://dashboard.example").unwrap();
+    let router = Router::new()
+        .fallback(get(|| async { "ok" }).post(|| async { "ok" }))
+        .layer(axum::middleware::from_fn_with_state(
+            auth,
+            crate::network_request,
+        ));
+    for (path, host, origin, expected) in [
+        (
+            "/",
+            "dashboard.example",
+            "https://dashboard.example",
+            StatusCode::OK,
+        ),
+        (
+            "/",
+            "dashboard.example",
+            "http://dashboard.example",
+            StatusCode::FORBIDDEN,
+        ),
+        (
+            "/",
+            "evil.example",
+            "https://dashboard.example",
+            StatusCode::FORBIDDEN,
+        ),
+        (
+            "/api/users",
+            "localhost:4321",
+            "http://localhost:4321",
+            StatusCode::FORBIDDEN,
+        ),
+        (
+            "/api/auth/ticket",
+            "localhost:4321",
+            "http://localhost:4321",
+            StatusCode::OK,
+        ),
+        (
+            "/healthz",
+            "127.0.0.1:4321",
+            "http://127.0.0.1:4321",
+            StatusCode::OK,
+        ),
+    ] {
+        let request = Request::builder()
+            .uri(path)
+            .header("host", host)
+            .header("origin", origin)
+            .header("x-forwarded-host", "dashboard.example")
+            .header("x-forwarded-proto", "https")
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(
+            router.clone().oneshot(request).await.unwrap().status(),
+            expected,
+            "{path}: {host} {origin}"
+        );
+    }
+}
+
+#[tokio::test]
+#[ignore = "Requires NATSUI_TEST_SERVER"]
+async fn native_lifecycle_publish_and_bucket_reads() {
+    use axum::{
+        body::{Body, to_bytes},
+        http::Request,
+    };
+    use std::sync::Arc;
+    use tokio::sync::RwLock;
+    use tower::ServiceExt;
+    async fn call(
+        app: &crate::App,
+        path: &str,
+        body: Option<serde_json::Value>,
+    ) -> (u16, serde_json::Value) {
+        let request = Request::builder()
+            .uri(path)
+            .method(if body.is_some() { "POST" } else { "GET" })
+            .header("host", "localhost:4321")
+            .header("content-type", "application/json")
+            .header("x-natsui-request", "1")
+            .body(Body::from(body.map(|v| v.to_string()).unwrap_or_default()))
+            .unwrap();
+        let response = crate::router(app.clone()).oneshot(request).await.unwrap();
+        let status = response.status().as_u16();
+        let bytes = to_bytes(response.into_body(), 2_000_000).await.unwrap();
+        (
+            status,
+            serde_json::from_slice(&bytes)
+                .unwrap_or_else(|_| json!(String::from_utf8_lossy(&bytes))),
+        )
+    }
+    async fn operation(app: &crate::App, p: serde_json::Value) -> serde_json::Value {
+        let (code, preview) = call(app, "/api/operations/preview", Some(p)).await;
+        assert_eq!(code, 200, "{preview}");
+        let approval = json!({"token":preview["token"],"confirmation":preview["confirmation"]});
+        let (code, result) = call(app, "/api/operations/apply", Some(approval.clone())).await;
+        assert_eq!(code, 200, "{result}");
+        assert_eq!(
+            call(app, "/api/operations/apply", Some(approval)).await.0,
+            409
+        );
+        result
+    }
+    let server = Server::start(false);
+    let admin = server.client("admin", "test-admin", false).await;
+    let app = crate::App {
+        auth: crate::auth::Auth::disabled(),
+        editor: crate::editing::Editor::new(true),
+        connection: None,
+        settings_cache: Arc::new(RwLock::new(crate::store::Settings::default())),
+        db: crate::store::Database::open(server.dir.join("dashboard").to_str().unwrap()).unwrap(),
+        current: Arc::new(RwLock::new(
+            telemetry::observe(&admin, "$JS.API", "test").await,
+        )),
+        nats: Arc::new(RwLock::new(Some(admin.clone()))),
+        monitor: crate::monitoring::Monitor::new("").unwrap(),
+        demo: false,
+        prefix: "$JS.API".into(),
+        scope: "test".into(),
+    };
+    let created=operation(&app,json!({"action":"create_stream","stream":"CREATED","config":{"subjects":["created.>"],"storage":"memory","retention":"limits","num_replicas":1,"max_msgs":100}})).await;
+    assert_eq!(created["verified"], true);
+    assert_eq!(call(&app,"/api/operations/preview",Some(json!({"action":"create_stream","stream":"CREATED","config":{"subjects":["created.>"]}}))).await.0,409);
+    let published=operation(&app,json!({"action":"publish","mode":"jetstream","stream":"CREATED","subject":"created.one","payload":"stored"})).await;
+    assert_eq!(published["storage_verified"], true);
+    let core = operation(
+        &app,
+        json!({"action":"publish","mode":"core","subject":"uncaptured.one","payload":"transient"}),
+    )
+    .await;
+    assert_eq!(core["storage_verified"], false);
+    operation(&app,json!({"action":"create_consumer","stream":"CREATED","consumer":"worker","config":{"deliver_policy":"all","filter_subject":"created.>"}})).await;
+    let before = telemetry::request(
+        &admin,
+        "$JS.API.CONSUMER.INFO.CREATED.worker".into(),
+        json!({}),
+    )
+    .await
+    .unwrap();
+    let js = async_nats::jetstream::new(admin.clone());
+    let kv = js
+        .create_key_value(async_nats::jetstream::kv::Config {
+            bucket: "config".into(),
+            history: 3,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    kv.put("active", "value".into()).await.unwrap();
+    kv.put("removed", "old".into()).await.unwrap();
+    kv.delete("removed").await.unwrap();
+    let objects = js
+        .create_object_store(async_nats::jetstream::object_store::Config {
+            bucket: "reports".into(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    objects
+        .put("test.txt", &mut &b"object content"[..])
+        .await
+        .unwrap();
+    *app.current.write().await = telemetry::observe(&admin, "$JS.API", "test").await;
+    let (code, buckets) = call(&app, "/api/buckets", None).await;
+    assert_eq!(code, 200);
+    assert_eq!(buckets["buckets"].as_array().unwrap().len(), 2);
+    let (code, keys) = call(&app, "/api/buckets/kv/config", None).await;
+    assert_eq!(code, 200, "{keys}");
+    assert_eq!(keys["rows"].as_array().unwrap().len(), 2);
+    let (code, entry) = call(&app, "/api/buckets/kv/config/entry?key=active", None).await;
+    assert_eq!(code, 200, "{entry}");
+    assert_eq!(entry["text"], "value");
+    assert_eq!(entry["present"], true);
+    let (_, deleted) = call(&app, "/api/buckets/kv/config/entry?key=removed", None).await;
+    assert_eq!(deleted["operation"], "DEL");
+    assert_eq!(deleted["present"], false);
+    let (code, keys) = call(&app, "/api/buckets/object/reports", None).await;
+    assert_eq!(code, 200, "{keys}");
+    assert_eq!(keys["rows"][0]["name"], "test.txt");
+    let key = keys["rows"][0]["key"].as_str().unwrap();
+    let (code, object) = call(
+        &app,
+        &format!("/api/buckets/object/reports/entry?key={key}"),
+        None,
+    )
+    .await;
+    assert_eq!(code, 200, "{object}");
+    assert_eq!(object["size"], 14);
+    let after = telemetry::request(
+        &admin,
+        "$JS.API.CONSUMER.INFO.CREATED.worker".into(),
+        json!({}),
+    )
+    .await
+    .unwrap();
+    for field in ["delivered", "ack_floor", "num_pending", "num_ack_pending"] {
+        assert_eq!(before[field], after[field]);
+    }
+    let (_, preview) = call(
+        &app,
+        "/api/operations/preview",
+        Some(json!({"action":"delete_stream","stream":"CREATED"})),
+    )
+    .await;
+    let mut info = telemetry::request(&admin, "$JS.API.STREAM.INFO.CREATED".into(), json!({}))
+        .await
+        .unwrap();
+    info["config"]["max_msgs"] = json!(50);
+    telemetry::request(
+        &admin,
+        "$JS.API.STREAM.UPDATE.CREATED".into(),
+        info["config"].clone(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        call(
+            &app,
+            "/api/operations/apply",
+            Some(json!({"token":preview["token"],"confirmation":preview["confirmation"]}))
+        )
+        .await
+        .0,
+        409
+    );
+    operation(
+        &app,
+        json!({"action":"delete_consumer","stream":"CREATED","consumer":"worker"}),
+    )
+    .await;
+    operation(&app, json!({"action":"delete_stream","stream":"CREATED"})).await;
 }

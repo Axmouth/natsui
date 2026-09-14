@@ -1,6 +1,6 @@
 # Fibril port and additions ledger
 
-Last updated: 2026-09-12. This document describes the actual repository state. An implemented row is not a claim of production readiness. Update this ledger in the same change as each feature; AGENTS.md makes that a project convention.
+Last updated: 2026-09-14. This document describes the actual repository state. An implemented row is not a claim of production readiness. Update this ledger in the same change as each feature; AGENTS.md makes that a project convention.
 
 Status vocabulary: **Implemented**, **Adapted**, **Planned**, **Optional integration**, **Not ported**. Planned and optional rows are not available UI features. Verification appears at the end.
 
@@ -246,3 +246,31 @@ NATSUI_URL accepts up to 32 comma-separated seed addresses. Initial connections 
 HTTP monitoring stays separate because each endpoint reports one process and NATS discovery does not provide its HTTP address or port. The setup guide explains both protocols, the separate collection behavior, seed examples and connection-file mounts. Setup prose uses sentences without semicolons.
 
 Verification: all 32 Rust tests passed on Windows and Linux, including a stalled seed, an offline seed, mutual TLS, certificate rejection, reconnects without advertised peers and subscription recovery. A disposable three-node TLS/password cluster also passed cold start with the first seed offline, recovery after stopping the connected node and independent 2/3 monitoring coverage. Losing startup connections were confirmed closed. Pages links, demo checks, Clippy and Linux packaging passed.
+
+## Ansible deployment example
+
+A standalone playbook and repository/Pages guide provision a protected dashboard on an existing Linux Docker host. Vault-backed source files, UID 10001 storage ownership, individual read-only secret mounts, change-triggered recreation, optional broker readiness checks and loopback access through SSH are covered. The playbook uses the existing key-file interface. The playbook keeps explicit secret provisioning. The standalone Compose initializer and one-time login command are implemented separately.
+
+## Shared access and native operations increment
+
+| Aspect | Current form | Reason and boundary |
+| --- | --- | --- |
+| Easier protected login | Implemented idempotent Compose initialization and one-time 60-second login tickets | Preserves file-based bootstrap authority and Ansible provisioning. Existing access keys remain supported. |
+| F35 and N08 dashboard users and roles | Implemented named key identities, viewer/operator/admin enforcement, rotation, disabling and revision checks | Key digests persist in access.sqlite3. This is not OIDC or password authentication. |
+| Public dashboard HTTPS | Implemented explicit NATSUI_PUBLIC_URL and Secure cookies behind a trusted proxy | The internal listener remains HTTP. Forwarded headers never expand the accepted origin. |
+| Monitoring transport security | Implemented per-endpoint CA, client certificates, Basic and Bearer credential files | Separate from NATS transport credentials. Credentials require HTTPS and are never forwarded across redirects. |
+| F19 resource lifecycle | Implemented reviewed native stream and durable pull-consumer creation/deletion | Deletion revalidates identity and configuration. Native NATS has no atomic revision-checked deletion against external replacement. |
+| F22 test publish | Implemented explicit Core or expected-stream JetStream publishing, bounded payload and no automatic retry | Core acceptance is not storage or processing evidence. JetStream acknowledgment identifies stored stream and sequence. |
+| N12 KV and Object Store | Implemented retained-key listing, explicit latest KV revision/tombstone inspection and object metadata | Uses information and message-get APIs without creating or pulling application consumers. Object chunks are not downloaded. |
+
+Ansible verification passed with ansible-core 2.19.13 and Docker Compose 5.5.1: syntax/check mode, Vault decryption, unchanged second deployment, credential rotation, session invalidation and retained settings. Access tests pass on Windows and Linux, including roles, stale revisions, key rotation, ticket expiry/reuse and exact public-origin checks. Native lifecycle and bucket integration checks are being completed separately.
+
+## Shared deployment review corrections, 2026-09-14
+
+Named dashboard identities, explicit HTTPS origin, per-endpoint monitoring credentials, independent connection profiles, native lifecycle/publish operations and read-only bucket browsing are implemented. The optional controller handles config-based NATS users and selected server limits only when deployment authority is supplied. These are NATS-specific additions, rather than Fibril job-state analogues.
+
+The independent maintainability review led to credential-bound sessions, persistent user revisions, one authentication middleware boundary, per-tab profile routing and bounded session-owned review maps. Controller acceptance and process supervision now have real-process regressions. [Review findings](docs/MAINTAINABILITY_REVIEW.md) records reasons and remaining limits. [Implementation queue](docs/IMPLEMENTATION_QUEUE.md) distinguishes completion from endurance evidence still needing elapsed time.
+
+Pages deployment guides are generated from the Markdown source to avoid parallel documentation copies. Monitoring TLS/auth tests and literal UI route checks are included in the repository and CI. The normal dashboard and one-command demo still run without the optional controller.
+
+Final local verification passed: all 45 Linux Rust tests with real brokers, 39 Windows unit tests, Linux and Windows packaging, controller process/TLS/user tests, monitoring security integration, Pages/demo checks and the authenticated cluster browser regression. The independent final review found no remaining blockers in the reviewed changes. A 24-hour recording is running separately and is not yet qualified.
