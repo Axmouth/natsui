@@ -1,3 +1,4 @@
+mod auth;
 mod connection;
 mod editing;
 mod incidents;
@@ -28,6 +29,7 @@ use tokio::sync::RwLock;
 
 #[derive(Clone)]
 struct App {
+    auth: auth::Auth,
     editor: editing::Editor,
     db: store::Database,
     current: Arc<RwLock<Snapshot>>,
@@ -42,6 +44,18 @@ struct App {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args: Vec<String> = std::env::args().collect();
+    if args.get(1).map(String::as_str) == Some("--init-auth") {
+        if args.len() != 3 {
+            return Err("Usage: natsui --init-auth PATH".into());
+        }
+        auth::initialize(std::path::Path::new(&args[2]))?;
+        println!(
+            "Dashboard access key created. Keep the file private; set NATSUI_AUTH_TOKEN_FILE to its path."
+        );
+        return Ok(());
+    }
+    let auth = auth::Auth::from_env()?;
     let demo = std::env::args().any(|a| a == "--demo");
     let port: u16 = std::env::var("NATSUI_PORT")
         .unwrap_or("4321".into())
@@ -88,7 +102,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(_) | Ok("0") => false,
         _ => return Err("NATSUI_ALLOW_WRITES must be 0 or 1".into()),
     };
+    println!(
+        "Dashboard authentication: {}",
+        if auth.enabled() {
+            "access-key login required"
+        } else {
+            "disabled, trusted local access"
+        }
+    );
     let app = App {
+        auth,
         editor: editing::Editor::new(allow_writes),
         connection,
         settings_cache,
@@ -133,6 +156,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 fn router(app: App) -> Router {
     Router::new()
+        .route("/login", get(auth::page))
+        .route(
+            "/login.js",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/javascript")],
+                    include_str!("../web/login.js"),
+                )
+            }),
+        )
+        .route(
+            "/api/auth/login",
+            axum::routing::post(auth::login).layer(axum::extract::DefaultBodyLimit::max(1024)),
+        )
+        .route("/api/auth/logout", axum::routing::post(auth::logout))
         .route(
             "/",
             get(|| async { Html(include_str!("../web/index.html")) }),
@@ -235,6 +273,10 @@ fn router(app: App) -> Router {
         )
         .route("/healthz", get(|| async { "ok" }))
         .route("/readyz", get(readiness))
+        .layer(axum::middleware::from_fn_with_state(
+            app.auth.clone(),
+            auth::guard,
+        ))
         .layer(axum::middleware::from_fn(local_request))
         .with_state(app)
 }
@@ -277,7 +319,7 @@ async fn snapshot(State(app): State<App>) -> Json<Value> {
         Err(_) => app.settings_cache.read().await.clone(),
     };
     Json(
-        json!({"snapshot": state, "summary": telemetry::summarize(&state, settings.backlog_threshold), "settings": settings, "monitoring": app.monitor.current.read().await.clone(), "dashboard":{"writes_enabled":app.editor.allowed && !app.demo,"version":env!("CARGO_PKG_VERSION"),"storage":app.db.health()}}),
+        json!({"snapshot": state, "summary": telemetry::summarize(&state, settings.backlog_threshold), "settings": settings, "monitoring": app.monitor.current.read().await.clone(), "dashboard":{"auth_enabled":app.auth.enabled(),"writes_enabled":app.editor.allowed && !app.demo,"version":env!("CARGO_PKG_VERSION"),"storage":app.db.health()}}),
     )
 }
 async fn readiness(State(app): State<App>) -> (StatusCode, Json<Value>) {

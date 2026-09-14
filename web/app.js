@@ -12,7 +12,7 @@ function currentPage(){ return location.hash.slice(1).split('?')[0] || 'overview
 function filters(){ return new URLSearchParams(location.hash.split('?')[1] || ''); }
 function filterUrl(key,value){ const params=filters(); if(value)params.set(key,value); else params.delete(key); historyReplace(`#${currentPage()}${params.size?'?'+params:''}`); }
 function historyReplace(url){ window.history.replaceState(null,'',url); }
-async function api(path, options){ if(staticDemo)return globalThis.NatsuiDemo.api(path,options);const response=await fetch(path,options); if(!response.ok)throw new Error((await response.text()).slice(0,250)); return response.json(); }
+async function api(path, options){ if(staticDemo)return globalThis.NatsuiDemo.api(path,options);const response=await fetch(path,options); if(response.status===401){location.replace('/login');throw new Error('Sign-in required');} if(!response.ok)throw new Error((await response.text()).slice(0,250)); return response.status===204?null:response.json(); }
 function navigate(){
  const page=pages[currentPage()]?currentPage():'overview';
  document.querySelectorAll('.page').forEach(e=>e.hidden=e.id!==`page-${page}`);
@@ -107,7 +107,7 @@ function render(){
  $('scenario-panel').hidden=!s.scenario;
  if(s.scenario){$('scenario-phase').textContent=s.scenario.phase;$('scenario-description').textContent=s.scenario.description;$('scenario-time').textContent=`${s.scenario.second}s / ${s.scenario.duration}s`;$('scenario-progress').value=s.scenario.second;$('scenario-source').textContent=s.demo?'SIMULATED SCENARIO':'LIVE WORKLOAD';}
  $('scenario-pause').hidden=!staticDemo;$('scenario-reset').hidden=!staticDemo;
- $('profile').textContent=s.scope;$('demo-banner').hidden=!s.demo;$('mode').textContent=s.demo?'Simulation':s.status==='complete'?(data.dashboard?.writes_enabled?'Live / edits enabled':'Live / read-only'):s.status;$('mode').className=`badge ${s.demo?'demo':s.status==='complete'?'good':'warn'}`;
+ $('sign-out').hidden=!data.dashboard?.auth_enabled;$('profile').textContent=s.scope;$('demo-banner').hidden=!s.demo;$('mode').textContent=s.demo?'Simulation':s.status==='complete'?(data.dashboard?.writes_enabled?'Live / edits enabled':'Live / read-only'):s.status;$('mode').className=`badge ${s.demo?'demo':s.status==='complete'?'good':'warn'}`;
  $('largest').textContent=summary.largest?number(summary.largest.pending):s.status==='unavailable'?'--':'0';$('largest-name').textContent=summary.largest?`${summary.largest.name} / ${summary.largest.stream}`:'No observed consumer';
  $('behind').textContent=number(summary.behind);$('threshold-label').textContent=`More than ${number(data.settings.backlog_threshold)} pending deliveries`;$('streams-count').textContent=number(summary.streams);$('consumer-count').textContent=`${number(summary.consumers)} observed consumers`;$('storage').textContent=bytes(summary.stored_bytes);$('nav-streams').textContent=number(summary.streams);$('nav-consumers').textContent=number(summary.consumers);
  const issueNodes=s.issues.map(text=>element('div',text,'issue'));if(s.status==='partial')issueNodes.unshift(element('div','Partial coverage: counts below describe observed resources, not the entire account.','issue'));$('collection-issues').replaceChildren(...issueNodes);
@@ -282,3 +282,5 @@ function renderResources(){
   $('load-connections').onclick=async()=>{const id=n.server_id;const button=$('load-connections');button.dataset.busy='1';button.disabled=true;try{const result=await api(`/api/nodes/${n.slot}/connections`);if(filters().get('id')!==id)return;const host=$('node-connections');host.replaceChildren(element('p',`${result.connections.length} of ${result.total} connections, observed ${new Date(result.at*1000).toLocaleTimeString()}`),table([['Client'],['SDK'],['RTT'],['Pending bytes',true],['Subscriptions',true]],result.connections.map(c=>[cell(c.name||`Connection ${c.cid}`),cell(`${c.lang||'unknown'} ${c.version||''}`),cell(c.rtt||'--'),cell(number(c.pending_bytes),true),cell(number(c.subscriptions),true)])));}catch(e){empty('node-connections',e.message);}finally{delete button.dataset.busy;button.disabled=false;}};
  }
 }
+
+$('sign-out').onclick=async()=>{try{await api('/api/auth/logout',{method:'POST',headers:{'X-Natsui-Request':'1'}});location.replace('/login');}catch(error){$('freshness').textContent=error.message;}};

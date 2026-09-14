@@ -1,6 +1,16 @@
 # Local beta access boundaries
 
-The native dashboard listens on IPv4 loopback. Docker mode listens on the container network and requires host-loopback port publication. Host and Origin checks reject unexpected browser origins and DNS rebinding; these checks are not authentication. Any process or person with access to the allowed HTTP endpoint can inspect permitted payloads and change local dashboard settings. Public reverse-proxy deployment and shared users remain outside this beta's access model.
+The native dashboard listens on IPv4 loopback. Docker mode listens on the container network and requires host-loopback port publication. Host and Origin checks reject unexpected browser origins and DNS rebinding; these checks are not authentication. Without NATSUI_AUTH_TOKEN_FILE, any process or person with access to the allowed HTTP endpoint can inspect permitted payloads and change local dashboard settings. With it configured, protected routes require a valid operator session. Public reverse-proxy deployment and shared users remain outside this beta's access model.
+
+## Dashboard authentication
+
+NATSUI_AUTH_TOKEN_FILE enables a generated-access-key login independent of NATS credentials. Sessions use random tokens, HttpOnly/SameSite=Strict cookies, an eight-hour server-enforced lifetime and server-side sign-out revocation. Restart invalidates all sessions. The key is loaded at startup; missing, unreadable or malformed configured files fail closed. Sign-in attempts are bounded to 30 per minute across the instance, with a 1 KiB body limit and at most 32 active sessions.
+
+Authentication protects dashboard and API access, including payload inspection, history, settings and reviewed writes. Login assets and health/readiness endpoints remain public. The shared key grants one configured operator identity, without per-user roles or attribution. Access-key and session digests remain in memory; the key is not written to SQLite or browser storage. Session cookies are sent only to the configured browser host; cookie scope does not isolate different ports on the same host.
+
+The existing localhost HTTP access model remains. Cookies omit Secure for this loopback-only mode. This is not approval to expose HTTP or forward untrusted requests through a proxy; public HTTPS/origin configuration and team authorization remain unimplemented. Host and Docker administrators can access or replace the secret and remain trusted. Authentication does not reduce NATS permissions or isolate message payload access by user.
+
+[Setup, secret rotation and persistent volumes](docs/SETUP.md) contains deployment commands. Design references: [OWASP session management](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html) and [REST transport/access controls](https://cheatsheetseries.owasp.org/cheatsheets/REST_Security_Cheat_Sheet.html).
 
 ## NATS identity
 
@@ -50,7 +60,7 @@ Message payloads and headers are fetched on demand and are not stored by Natsui.
 
 ## Remaining deployment gate
 
-Shared access requires authentication, payload-access authorization, settings roles and an explicit public-origin policy. Native broker mutations additionally require authorization and reviewable before/after changes. A NATS configuration supervisor is a separate deployment capability, not part of this application.
+Team access still requires individual identities, payload-access authorization, settings roles and an explicit public-origin policy. Native broker mutations additionally require authorization and reviewable before/after changes. A NATS configuration supervisor is a separate deployment capability, not part of this application.
 
 ## Optional local configuration editing
 
@@ -65,4 +75,4 @@ $JS.API.CONSUMER.CREATE.ORDERS.worker
 
 Names are examples. JetStream domains require the corresponding `$JS.<domain>.API` prefix. The consumer endpoint authorizes creation as well as updates at the NATS permission layer; this dashboard sends only update requests. Avoid blanket management permissions merely to edit one resource.
 
-The HTTP listener remains local operator access with no shared login. Other local processes are inside this trust boundary. Enabling writes is not suitable for exposing the dashboard publicly. Preview tokens, request headers and Host/Origin checks protect the reviewed local workflow; they do not replace authentication. See [settings ownership and edit guarantees](SETTINGS_AND_ACCESS.md#implemented-jetstream-editor).
+The HTTP listener remains local operator access with optional access-key login. Other local processes are inside this trust boundary. Enabling writes is not suitable for exposing the dashboard publicly. Preview tokens, request headers and Host/Origin checks protect the reviewed local workflow; they do not replace authentication. See [settings ownership and edit guarantees](SETTINGS_AND_ACCESS.md#implemented-jetstream-editor).

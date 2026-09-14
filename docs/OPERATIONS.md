@@ -34,10 +34,10 @@ $env:NATSUI_PROFILE = 'local-development'
 NATSUI_URL=nats://127.0.0.1:4222 NATSUI_PROFILE=local-development ./natsui
 ```
 
-The root Compose file in the source checkout builds the dashboard for an existing broker. Its default broker address is `host.docker.internal:4222`. A broker listening only on the host's loopback may not be reachable through that Docker gateway; a shared private Docker network or the native binary avoids exposing broker ports.
+The root Compose file in the source checkout runs the published dashboard for an existing broker. Its default broker address is `host.docker.internal:4222`. A broker listening only on the host's loopback may not be reachable through that Docker gateway; a shared private Docker network or the native binary avoids exposing broker ports.
 
 ```sh
-docker compose up --build -d --wait
+docker compose up -d --wait
 ```
 
 The container runs as UID 10001, with a read-only root filesystem and a writable named data volume. The published dashboard port is restricted to host loopback. Credentials and TLS files can be mounted read-only with the environment variables below. [Access and credential setup](../SECURITY.md) contains the permission template and container example.
@@ -51,11 +51,11 @@ cargo build --release --locked
 node scripts/package.mjs
 ```
 
-The binary is in `target/release`. The optional packaging script produces a platform-named archive, documentation and SHA-256 checksum under `dist-release`; it requires Node 22 or later and tar. CI prepares artifacts for Linux, Windows and macOS. Configured CI targets are not a claim that every platform has already been tested. No public download or registry publication is configured yet.
+The binary is in `target/release`. The optional packaging script produces a platform-named archive, documentation and SHA-256 checksum under `dist-release`; it requires Node 22 or later and tar. CI prepares artifacts for Linux, Windows and macOS. Configured CI targets are not a claim that every platform has already been tested. GitHub Actions publishes native artifacts, container images and the Pages demo after verification.
 
 ## Simulation without a broker
 
-`natsui --demo` serves a clearly labeled local simulation. `node scripts/export-demo.mjs` produces `dist-demo`, a static web demo with no backend connection. The static demo models workload phases, consumers, histories, incidents and replica placement. Native node metrics remain unavailable there. The static export can be served by an ordinary static web server.
+`natsui --demo` serves a clearly labeled local simulation. `node scripts/export-demo.mjs` produces `dist-demo`, a static web demo with no backend connection. The static demo models workload phases, consumers, histories, incidents and replica placement. Node metrics, clients and subscriptions are also synthetic. The static export can be served by an ordinary static web server.
 
 ## Included
 
@@ -68,6 +68,10 @@ The binary is in `target/release`. The optional packaging script produces a plat
 - Persistent observed changes and allowlisted JetStream advisories, with explicit coverage limits.
 - Linked investigation charts, historical windows, pause and JSON export without message payloads.
 - Local settings, storage-health reporting and guarded profile history.
+
+## Persistent storage and dashboard login
+
+[Setup guide](SETUP.md) covers named volumes, UID 10001 permissions, access-key generation, secret rotation and stopped-process backup/restore. History and secrets use separate mounts. The cluster tryout stays unauthenticated and local.
 
 ## Configuration
 
@@ -82,7 +86,9 @@ The binary is in `target/release`. The optional packaging script produces a plat
 | NATSUI_DOMAIN | Unset | JetStream API domain |
 | NATSUI_MONITOR_URLS | Unset | Comma-separated native monitoring origins, at most 32 |
 | NATSUI_PORT | 4321 | Dashboard HTTP port |
-| NATSUI_DATA_DIR | data | SQLite directory |
+| NATSUI_DATA_DIR | data (image: /data) | Persistent SQLite directory; mount the entire directory |
+| NATSUI_AUTH_TOKEN_FILE | Unset | Generated dashboard access-key file; enables session authentication |
+| NATSUI_ALLOW_WRITES | 0 | Opt-in reviewed JetStream updates, subject to broker permissions |
 | NATSUI_HISTORY_MAX_MB | 128 | Serialized history budget across all profiles, 16-4096 MiB |
 | NATSUI_CONTAINER | 0 | Set to 1 only inside a container with host-loopback port publication |
 | NATSUI_ADOPT_LEGACY_PROFILE | Unset | One-time value 1 binds verified existing unbound history to the configured connection |
@@ -110,6 +116,7 @@ cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked
 node scripts/test-trends.mjs
 node scripts/test-demo.mjs
+node scripts/test-site.mjs
 ```
 
 Full integration tests require a disposable NATS executable and temporary TLS fixtures. OpenSSL is required only for fixture generation:
@@ -143,3 +150,5 @@ Design inspired by [Fibril](https://github.com/Axmouth/fibril). Theme styles are
 `NATSUI_ALLOW_WRITES=1` enables the JetStream configuration section in Settings for the current connection. The default is `0`; only the dashboard needs restarting to enable this capability. Applying supported resource edits does not require a NATS restart. NATS 2.11+ in the 2.x series and native update permissions are required. The standard read-only permission template remains valid for inspection.
 
 Settings loads a fresh resource configuration, previews changed fields, and verifies an applied update with a native INFO read. Activity retains the attempted change and outcome. Retention reductions can delete records immediately. Shared authentication and server-file editing are separate capabilities. See [editor details](../SETTINGS_AND_ACCESS.md#implemented-jetstream-editor) and [write permissions](../SECURITY.md#optional-local-configuration-editing).
+
+Container authentication and persistence verification: build a local image and run `node scripts/smoke-auth-storage.mjs IMAGE`. The check uses disposable named volumes to verify login/logout, restart session revocation, container replacement and stopped-process backup/restore. It removes its test containers and volumes afterward and never prints generated keys or session cookies.

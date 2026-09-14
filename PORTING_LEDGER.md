@@ -217,3 +217,18 @@ The browser demo labels subscription inventory as simulated. Real monitoring ret
 The shared stylesheet applies to live dashboards and the browser demo. Page titles and scenario controls remain in normal document flow.
 
 Verification: the static build passed and browser inspection confirmed the header remains visible over a long subject inventory in the narrow layout, with the theme menu layered above content. Theme-menu focus preserves the scroll position.
+
+
+## Dashboard authentication and deployment guide
+
+| Aspect | Form | Reason and boundary |
+| --- | --- | --- |
+| Natsui addition: dashboard authentication | Optional generated-access-key login, expiring sessions and sign-out | Protects dashboard/API access independently of NATS credentials without another service. All key holders share one operator identity; individual users, roles and public deployment remain unimplemented. |
+| Natsui addition: bounded authentication | Implemented | 256-bit generated keys and sessions, constant-time key-digest comparison, eight-hour server expiry, explicit revocation, restart invalidation, session cap and sign-in rate/body limits. Invalid configured key files fail startup. Existing Host/Origin and mutation-header controls remain enforced. |
+| Fibril-style accessible setup documentation | Adapted as a Pages setup guide | The guide connects the disposable cluster tryout to authenticated existing-broker deployment, with native and Docker startup paths and an authenticated Compose download. |
+| Natsui addition: explicit SQLite persistence contract | Documented and verified | The entire /data directory belongs on writable local persistent storage, including WAL/SHM companions. Secret mounts remain separate. Volume ownership, lifecycle, logical versus physical budgets, stopped backups and fresh-volume restores are covered. |
+| Natsui addition: repeatable auth/storage deployment checks | Added to CI | A real container drill verifies access-key initialization, protected requests, sign-out, session revocation after replacement, retained settings/history and backup restoration without logging credentials. |
+
+Verification: all 30 Rust tests passed on Windows and Linux, including real NATS TLS, permissions and reviewed edits. The Linux verification image also packaged the binary and deployment documentation. Clippy, trend/simulation tests and static-site link/isolation checks passed. Browser verification exercised invalid login, successful login and sign-out, and rendered the Pages setup guide. The Docker auth/storage drill passed with UID 10001, read-only container roots, a separate read-only secret volume, replacement of the container and restoration into a fresh volume.
+
+Authentication remains opt-in for trusted local deployment through NATSUI_AUTH_TOKEN_FILE. The one-command cluster demo and static browser demo retain their documented unauthenticated behavior. Prior no-login entries describe earlier increments; this entry supersedes them for the single-operator mode only.

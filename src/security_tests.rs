@@ -291,6 +291,7 @@ async fn reviewed_configuration_edits() {
         .unwrap();
     telemetry::request(&admin,"$JS.API.CONSUMER.CREATE.ORDERS.worker".into(),json!({"stream_name":"ORDERS","config":{"durable_name":"worker","name":"worker","ack_policy":"explicit","max_ack_pending":20,"max_deliver":5},"action":"create"})).await.unwrap();
     let app = crate::App {
+        auth: crate::auth::Auth::disabled(),
         editor: crate::editing::Editor::new(true),
         connection: None,
         settings_cache: Arc::new(RwLock::new(crate::store::Settings::default())),

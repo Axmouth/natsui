@@ -1,0 +1,29 @@
+name: natsui-authenticated
+services:
+  dashboard:
+    image: ghcr.io/axmouth/natsui:latest
+    ports: ['127.0.0.1:4321:4321']
+    environment:
+      NATSUI_URL: ${NATSUI_URL:-nats://host.docker.internal:4222}
+      NATSUI_PROFILE: ${NATSUI_PROFILE:-production-observer}
+      NATSUI_AUTH_TOKEN_FILE: /run/natsui-auth/access.key
+      NATSUI_MONITOR_URLS: ${NATSUI_MONITOR_URLS:-}
+      NATSUI_ALLOW_WRITES: ${NATSUI_ALLOW_WRITES:-0}
+    extra_hosts: ['host.docker.internal:host-gateway']
+    volumes:
+      - history:/data
+      - auth:/run/natsui-auth:ro
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    mem_limit: 512m
+    pids_limit: 128
+    logging:
+      driver: json-file
+      options: {max-size: 5m, max-file: '2'}
+volumes:
+  history:
+    name: natsui-data
+  auth:
+    external: true
+    name: natsui-auth

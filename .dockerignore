@@ -7,6 +7,7 @@
 !web/**
 !deploy/
 !deploy/permissions.conf
+!deploy/compose.auth.yaml
 !LICENSE
 !Dockerfile
 

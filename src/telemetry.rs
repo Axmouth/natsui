@@ -330,6 +330,7 @@ mod tests {
         );
         let before_browse = observe(&client, "$JS.API", "integration").await;
         let app = crate::App {
+            auth: crate::auth::Auth::disabled(),
             editor: crate::editing::Editor::default(),
             connection: None,
             settings_cache: std::sync::Arc::new(tokio::sync::RwLock::new(

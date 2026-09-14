@@ -39,8 +39,18 @@ NATS Server 2.11.8 is a compatibility test baseline, not a claim that it is the 
 
 ## Deferred beyond the local beta
 
-Shared login, roles, public HTTP exposure, resource creation/deletion, server configuration editing and restart supervision remain separate capabilities. Native stream and consumer configuration editing is opt-in for local operator use; default connections remain read-only.
+Individual accounts, roles, public HTTP exposure, resource creation/deletion, server configuration editing and restart supervision remain separate capabilities. Optional access-key login is implemented for local operator access. Native stream and consumer configuration editing is opt-in for local operator use; default connections remain read-only.
 
 ## Publishing
 
 `.github/workflows/publish.yml` runs after successful main-branch verification. Each native Linux architecture builds the dashboard and traffic images and exercises a fresh three-node cluster before pushing. The bundle combines architecture manifests, resolves image digests, and verifies the registry-delivered Compose application. Pages deploys the static landing page, demo and fallback Compose file. First publication requires GitHub Pages Source=GitHub Actions and public visibility for the three GHCR packages. See [publishing operations](docs/PUBLISHING.md).
+
+
+## Authentication and persistent deployment increment
+
+- Generated access-key files fail closed when configured incorrectly; generation refuses overwrite.
+- Session expiry/revocation, login body and rate limits, and protection of read/write APIs are covered by Rust tests.
+- The Pages setup guide and authenticated Compose download are included in static-site link checks.
+- Docker auth/storage smoke verification passed: key initialization as UID 10001, separate secret mount, protected API reads, logout, replacement session invalidation, retained settings/history and fresh-volume restore.
+- Windows and Linux: all 30 Rust tests passed, including disposable real-broker TLS/permission/editing checks. Windows Clippy and Linux release packaging passed.
+- Browser: invalid key, successful sign-in and corrected sign-out redirect were verified. Public publication follows the verification workflow; these local checks do not claim that the new commit is already deployed.

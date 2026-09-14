@@ -92,6 +92,14 @@ Use a dedicated restricted NATS identity. [Security and permissions](SECURITY.md
 
 [Full configuration, storage limits and troubleshooting context](docs/OPERATIONS.md)
 
+## Dashboard login and persistent history
+
+The image stores SQLite in `/data`. **Mount the whole directory** with `-v natsui-data:/data`; mounting only the database file omits SQLite's WAL/SHM companions. Named volumes survive container replacement. A volume is not a backup, and `docker compose down -v` deletes non-external project volumes.
+
+`NATSUI_AUTH_TOKEN_FILE` enables an access-key login with eight-hour sessions and sign-out. `natsui --init-auth PATH` securely generates the key file without overwriting an existing file. Store it in a separate read-only mount. Missing or malformed configured keys stop startup; an unset variable retains trusted local access. This is single-operator authentication, not individual accounts or roles, and it does not enable public HTTP exposure.
+
+The [Pages setup guide](https://axmouth.github.io/natsui/setup.html) covers authenticated Docker startup. [Detailed setup, volume ownership, backup and restore](docs/SETUP.md) includes exact commands, key rotation and a downloadable Compose example. The one-command cluster tryout remains an explicitly unauthenticated local demo.
+
 ## A demo without a backend
 
 `natsui --demo` runs a clearly labeled local simulation. For a browser-only version:
@@ -106,7 +114,7 @@ The hosted [browser demo](https://axmouth.github.io/natsui/demo/) models workloa
 
 ## Status
 
-**Local operator beta.** Stream and consumer inspection, node monitoring, retained-record browsing and investigation history are implemented. Settings includes opt-in, reviewed JetStream configuration edits. Shared login, public HTTP deployment and server configuration control remain outside the current access model.
+**Local operator beta.** Stream and consumer inspection, node monitoring, retained-record browsing and investigation history are implemented. Settings includes opt-in, reviewed JetStream configuration edits. Optional single-operator login is implemented. Individual accounts, roles, public HTTP deployment and server configuration control remain outside the current access model.
 
 The integration suite has passed on Windows and Linux with NATS Server 2.11.8, including TLS, denied operations, reconnects and bounded large inventories. CI also targets macOS; support claims depend on successful runner results. The first endurance recording was interrupted and is not a completed 24-hour qualification. [Release evidence and remaining gates](RELEASE_CHECKLIST.md)
 

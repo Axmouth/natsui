@@ -43,13 +43,13 @@ Shared deployments should have user management. Proposed roles:
 
 Authorization must be enforced by the backend on every operation, including payload reads. Mutations must record the authenticated actor. Local passwords need a modern password hash, revocable sessions and a first-run setup with no default password. OIDC can be an optional community integration.
 
-The current local operator mode has no login. It binds only to 127.0.0.1 and rejects unexpected Host and cross-origin requests. It is not a multi-user security boundary against other local processes. Shared exposure must wait for authentication and profile-scoped authorization; simply changing the bind address is not a supported deployment path.
+The current local operator mode supports optional access-key login through NATSUI_AUTH_TOKEN_FILE, with expiring sessions and sign-out. Individual accounts and roles are not implemented. It binds only to 127.0.0.1 and rejects unexpected Host and cross-origin requests. It is not a multi-user security boundary against other local processes. Shared exposure must wait for individual identities and profile-scoped authorization; simply changing the bind address is not a supported deployment path.
 
 Dashboard users and NATS identities are distinct. Native NATS authorization still restricts what a configured connection can do. A dashboard administrator does not automatically acquire operator signing keys, a system-account identity or authority to change NATS users.
 
 
 
-The local beta runtime and credential boundary is documented in [SECURITY.md](SECURITY.md). Container mode requires host-loopback publication and does not implement shared access.
+The local beta runtime and credential boundary is documented in [SECURITY.md](SECURITY.md). Container mode requires host-loopback publication; access-key authentication does not implement multi-user authorization. See [deployment and storage setup](docs/SETUP.md).
 
 ## Implemented JetStream editor
 

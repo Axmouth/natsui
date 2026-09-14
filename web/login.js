@@ -1,0 +1,5 @@
+"use strict";
+const form=document.getElementById('login-form'),status=document.getElementById('login-status'),key=document.getElementById('access-key');
+const flavor=localStorage.getItem('natsui-flavor')||'';if(['','neuronic','chlorophyll','crimson','eosin','azure','iris','carotene'].includes(flavor))document.documentElement.dataset.flavor=flavor;
+document.documentElement.dataset.theme=localStorage.getItem('natsui-theme')==='light'?'light':'dark';
+form.onsubmit=async event=>{event.preventDefault();const button=form.querySelector('button');button.disabled=true;status.textContent='Signing in...';try{const response=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json','X-Natsui-Request':'1'},body:JSON.stringify({key:key.value.trim()})});key.value='';if(response.ok){location.replace('/');return;}status.textContent=response.status===429?'Too many sign-in attempts. Wait one minute and try again.':response.status===401?'Access key not recognized.':'Sign-in is unavailable. Check the dashboard and try again.';}catch{status.textContent='The dashboard could not be reached.';}finally{button.disabled=false;}};
