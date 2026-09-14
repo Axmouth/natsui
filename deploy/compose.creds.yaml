@@ -1,0 +1,11 @@
+services:
+  dashboard:
+    environment:
+      NATSUI_CREDS: /run/nats/observer.creds
+    volumes:
+      - type: bind
+        source: ./local-secrets/observer.creds
+        target: /run/nats/observer.creds
+        read_only: true
+        bind:
+          create_host_path: false

@@ -12,6 +12,8 @@ await copyFile(path.join(root,'web/kitten.svg'),path.join(out,'assets/kitten.svg
 await copyFile(path.join(root,'docs/screenshots/overview.png'),path.join(out,'assets/overview.png'));
 await copyFile(path.join(root,'demo/published.yaml'),path.join(out,'try/compose.yaml'));
 await copyFile(path.join(root,'deploy/compose.auth.yaml'),path.join(out,'try/compose.auth.yaml'));
+for(const name of ["compose.network.yaml","compose.tls.yaml","compose.mtls.yaml","compose.creds.yaml"])await copyFile(path.join(root,'deploy',name),path.join(out,'try',name));
+await copyFile(path.join(root,'deploy/permissions.conf'),path.join(out,'try/permissions.conf'));
 await writeFile(path.join(out,'.nojekyll'),'');
 const demo=await readFile(path.join(out,'demo/index.html'),'utf8');
 if(!demo.includes('connect-src &#39;none&#39;')&&!demo.includes("connect-src 'none'"))throw new Error('Static demo must disallow network connections');

@@ -8,6 +8,10 @@
 !deploy/
 !deploy/permissions.conf
 !deploy/compose.auth.yaml
+!deploy/compose.network.yaml
+!deploy/compose.tls.yaml
+!deploy/compose.mtls.yaml
+!deploy/compose.creds.yaml
 !LICENSE
 !Dockerfile
 

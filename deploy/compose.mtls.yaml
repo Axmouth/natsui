@@ -1,0 +1,18 @@
+services:
+  dashboard:
+    environment:
+      NATSUI_TLS_CERT: /run/nats/client.pem
+      NATSUI_TLS_KEY: /run/nats/client.key
+    volumes:
+      - type: bind
+        source: ./local-secrets/client.pem
+        target: /run/nats/client.pem
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./local-secrets/client.key
+        target: /run/nats/client.key
+        read_only: true
+        bind:
+          create_host_path: false

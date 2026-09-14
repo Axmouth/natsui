@@ -98,7 +98,7 @@ The image stores SQLite in `/data`. **Mount the whole directory** with `-v natsu
 
 `NATSUI_AUTH_TOKEN_FILE` enables an access-key login with eight-hour sessions and sign-out. `natsui --init-auth PATH` securely generates the key file without overwriting an existing file. Store it in a separate read-only mount. Missing or malformed configured keys stop startup; an unset variable retains trusted local access. This is single-operator authentication, not individual accounts or roles, and it does not enable public HTTP exposure.
 
-The [Pages setup guide](https://axmouth.github.io/natsui/setup.html) covers authenticated Docker startup. [Detailed setup, volume ownership, backup and restore](docs/SETUP.md) includes exact commands, key rotation and a downloadable Compose example. The one-command cluster tryout remains an explicitly unauthenticated local demo.
+The [Pages setup guide](https://axmouth.github.io/natsui/setup.html) covers cluster network discovery, multiple monitoring hosts, authenticated Docker startup, JWT credentials and mutual TLS with downloadable Compose files. [Detailed setup, volume ownership, backup and restore](docs/SETUP.md) includes exact commands, read-only credential mounts, connection checks and key rotation. The one-command cluster tryout remains an explicitly unauthenticated local demo.
 
 ## A demo without a backend
 

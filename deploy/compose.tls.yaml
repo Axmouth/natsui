@@ -1,0 +1,12 @@
+services:
+  dashboard:
+    environment:
+      NATSUI_TLS_REQUIRED: '1'
+      NATSUI_TLS_CA: /run/nats/ca.pem
+    volumes:
+      - type: bind
+        source: ./local-secrets/ca.pem
+        target: /run/nats/ca.pem
+        read_only: true
+        bind:
+          create_host_path: false

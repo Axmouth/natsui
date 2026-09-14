@@ -17,7 +17,7 @@ for(const file of ['README.md','LICENSE','SECURITY.md','RELEASE_CHECKLIST.md','P
 cpSync(join(root,'docs'),join(dir,'docs'),{recursive:true});
 mkdirSync(join(dir,'demo'),{recursive:true});
 for(const file of ['demo/README.md','demo/published.yaml','compose.yaml'])copyFileSync(join(root,file),join(dir,file));
-mkdirSync(join(dir,'deploy'),{recursive:true});for(const name of ['permissions.conf','compose.auth.yaml'])copyFileSync(join(root,'deploy',name),join(dir,'deploy',name));
+mkdirSync(join(dir,'deploy'),{recursive:true});for(const name of ["permissions.conf","compose.auth.yaml","compose.network.yaml","compose.tls.yaml","compose.mtls.yaml","compose.creds.yaml"])copyFileSync(join(root,'deploy',name),join(dir,'deploy',name));
 writeFileSync(join(dir,'QUICKSTART.txt'),`Natsui ${version} (${host})\n\nRun ${binary==='natsui.exe'?'.\\natsui.exe':'./natsui'} --demo for the local simulation.\nOpen http://127.0.0.1:4321 in a browser.\n\nFor real data, set NATSUI_URL and NATSUI_PROFILE and run without --demo.\nSee README.md and SECURITY.md for credentials and access boundaries.\nDocker and source-build commands in README.md require a source checkout.\n`);
 const archive=join(out,name+'.tar.gz');
 // Relative archive paths avoid GNU tar interpreting Windows drive letters as remote hosts.
