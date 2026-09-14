@@ -221,8 +221,7 @@ fn normalize(p: &mut Proposal) -> Result<String, Error> {
                     let number = value
                         .as_i64()
                         .ok_or_else(|| bad("Consumer limits must be exact integers"))?;
-                    if (field == "ack_wait" && number <= 0)
-                        || (field != "ack_wait" && number != -1 && number <= 0)
+                    if (number != -1 || field == "ack_wait") && number <= 0
                         || number > 9_007_199_254_740_991
                     {
                         return Err(bad("Invalid consumer limit"));
