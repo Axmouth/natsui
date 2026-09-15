@@ -3,7 +3,7 @@ const $ = id => document.getElementById(id);
 const staticDemo = globalThis.NATSUI_STATIC_DEMO === true;
 const activeProfile = sessionStorage.getItem('natsui-profile') || 'default';
 const pages = {operations:["Operations","Reviewed resource changes and explicit test publishing."],buckets:["Buckets","Key Value revisions and Object Store metadata."],nodes:['Nodes','Process resources, traffic and monitoring coverage.'],node:['Node detail','Reported process metrics and recorded trends.'],stream:['Stream detail','Retention, consumer progress and historical trends.'],about:['About','Origins and acknowledgments.'],overview:['Overview','Consumer progress, with the context to understand it.'],streams:['Streams','Stored records, subject capture and retention.'],consumers:['Consumers','Server-side delivery state. No worker polling required.'],messages:['Messages','Inspect what is retained, without taking work.'],activity:['Activity','A small, persistent record of this workspace.'],settings:['Settings','Clear boundaries between the dashboard and the server.'],coverage:['Data coverage','What is reported, what is derived, and what remains unknown.']};
-let data = null, history = [], timer, busy = false, settingsDirty = false, lastOk = 0;
+let data = null, history = [], timer, busy = false, refreshPending = false, settingsDirty = false, lastOk = 0;
 const recordsState={stream:'',subject:'',request:0,reading:0,pages:[],page:-1,next:null,loading:false};
 const number = value => value == null ? '--' : new Intl.NumberFormat().format(value);
 const bytes = value => value == null ? '--' : value >= 1073741824 ? `${(value / 1073741824).toFixed(1)} GiB` : value >= 1048576 ? `${(value / 1048576).toFixed(1)} MiB` : value >= 1024 ? `${(value / 1024).toFixed(1)} KiB` : `${Math.round(value)} B`;
@@ -49,8 +49,27 @@ function renderStreams(){
  if(host.dataset.rows!==key||!host.querySelector('table')){host.dataset.rows=key;host.replaceChildren(table([['Stream'],['Retained trend'],['Records',true],['Stored',true],['Retention'],['Replicas',true]],streams.map(()=>[cell(),cell(),cell(null,true),cell(null,true),cell(),cell(null,true)])));}
  streams.forEach((s,index)=>{const cells=host.querySelector('tbody').rows[index].cells;const b=element('a',s.config.name,'name-button');b.href='#stream?name='+encodeURIComponent(s.config.name);cells[0].replaceChildren(b,element('span',(s.config.subjects||[]).join(', '),'secondary'));const mini=cells[1].firstElementChild||element('div',null,'sparkline');if(!mini.isConnected)cells[1].append(mini);NatsuiTrends.draw(mini,resourceSeries('stream',{name:s.config.name,created:s.created},'messages'),{label:s.config.name+' / retained records',mini:true,interval:data.settings.refresh_seconds});cells[2].textContent=number(s.state?.messages);cells[3].textContent=bytes(s.state?.bytes);cells[4].textContent=s.config.retention||'limits';cells[5].textContent=number(s.config.num_replicas);});
 }
+const backlog={seconds:900,samples:[],range:null,total:0,truncated:false,loading:false,error:null,ticket:0};
+const savedBacklogWindow=Number(localStorage.getItem('natsui-backlog-window'));
+if([300,900,3600,21600].includes(savedBacklogWindow))backlog.seconds=savedBacklogWindow;
+$('backlog-window').value=String(backlog.seconds);
+async function loadBacklog(){
+ const ticket=++backlog.ticket,to=Math.floor(Date.now()/1000),from=to-backlog.seconds;
+ backlog.loading=true;backlog.error=null;
+ if(data)renderChart();
+ try{
+  const result=await api('/api/history/backlog?'+new URLSearchParams({from,to}));
+  if(ticket!==backlog.ticket)return;
+  Object.assign(backlog,{samples:result.samples,range:{from,to},total:result.total,truncated:result.truncated,aggregated:result.aggregated});
+ }catch(error){if(ticket===backlog.ticket){backlog.samples=[];backlog.error=error.message;}}
+ finally{if(ticket===backlog.ticket){backlog.loading=false;if(data)renderChart();}}
+}
+$('backlog-window').onchange=()=>{
+ backlog.seconds=Number($('backlog-window').value);localStorage.setItem('natsui-backlog-window',String(backlog.seconds));
+ backlog.samples=[];backlog.range=null;inspectedTime=null;loadBacklog();
+};
 let inspectedTime = null;
-function inspectChart(host, svg, samples, x, y, shape){
+function inspectChart(host, svg, samples, x, y, shape, range){
  const tip=element('div',null,'history-inspector');tip.id='history-inspector';tip.hidden=true;tip.setAttribute('role','status');
  const cursor=shape('line',{y1:15,y2:140,class:'inspection-cursor',visibility:'hidden'});
  const point=shape('circle',{r:4,class:'inspection-point',visibility:'hidden'});
@@ -58,17 +77,17 @@ function inspectChart(host, svg, samples, x, y, shape){
  const nearest=at=>samples.reduce((best,sample)=>Math.abs(sample.at-at)<Math.abs(best.at-at)?sample:best,samples[0]);
  function clear(){inspectedTime=null;tip.hidden=true;cursor.setAttribute('visibility','hidden');point.setAttribute('visibility','hidden');}
  function show(at){
-  inspectedTime=Math.max(samples[0].at,Math.min(samples.at(-1).at,at));const sample=nearest(inspectedTime);
+  inspectedTime=Math.max(range.from,Math.min(range.to,at));const sample=nearest(inspectedTime);
   const before=samples.findLast(item=>item.at<=inspectedTime),after=samples.find(item=>item.at>=inspectedTime);
-  const gap=before&&after&&after.at-before.at>data.settings.refresh_seconds*3;
+  const gap=before&&after?before.segment!==after.segment:Math.abs(sample.at-inspectedTime)>data.settings.refresh_seconds*3;
   cursor.setAttribute('x1',x(gap?inspectedTime:sample.at));cursor.setAttribute('x2',x(gap?inspectedTime:sample.at));cursor.setAttribute('visibility','visible');tip.hidden=false;
   const largest=sample.summary.largest,complete=sample.status==='complete'&&largest?.pending!=null;
   point.setAttribute('visibility',!gap&&complete?'visible':'hidden');
-  if(gap){tip.replaceChildren(element('strong','No samples in this interval'),element('span',`${new Date(before.at*1000).toLocaleTimeString()} to ${new Date(after.at*1000).toLocaleTimeString()}`));return;}
+  if(gap){tip.replaceChildren(element('strong',before&&after&&(!before.interval_seconds||!after.interval_seconds)?'Collection cadence was not recorded':'Continuity interrupted in this interval'),element('span',`${new Date((before?.at??range.from)*1000).toLocaleTimeString()} to ${new Date((after?.at??range.to)*1000).toLocaleTimeString()}`));return;}
   if(complete){point.setAttribute('cx',x(sample.at));point.setAttribute('cy',y(largest.pending));}
   tip.replaceChildren(element('time',new Date(sample.at*1000).toLocaleString()),element('strong',complete?`${number(largest.pending)} pending deliveries`:sample.status==='complete'?'No observed consumer':`Collection ${sample.status}`),element('span',complete?`${largest.name} / ${largest.stream}`:'No complete backlog value for this sample.'),element('span',complete?`${number(largest.ack_pending)} awaiting ack / ${sample.status} sample`:'Gaps are not zero traffic.'));
  }
- function pointer(event){const matrix=svg.getScreenCTM();if(!matrix)return;const p=svg.createSVGPoint();p.x=event.clientX;p.y=event.clientY;const local=p.matrixTransform(matrix.inverse());show(samples[0].at+(local.x-48)/540*(samples.at(-1).at-samples[0].at));}
+ function pointer(event){const matrix=svg.getScreenCTM();if(!matrix)return;const p=svg.createSVGPoint();p.x=event.clientX;p.y=event.clientY;const local=p.matrixTransform(matrix.inverse());show(range.from+(local.x-48)/540*(range.to-range.from));}
  host.onpointermove=pointer;host.onpointerdown=event=>{host.focus({preventScroll:true});pointer(event);};
  host.onpointerleave=event=>{if(event.pointerType!=='touch'&&document.activeElement!==host)clear();};
  host.onfocus=()=>{if(inspectedTime==null)show(samples.at(-1).at);};host.onblur=clear;
@@ -76,16 +95,21 @@ function inspectChart(host, svg, samples, x, y, shape){
  if(inspectedTime!=null)show(inspectedTime);
 }
 function renderChart(){
- const host=$('history-chart'); const valid=history.filter(h=>h.status==='complete' && h.summary.largest?.pending!=null);
- if(valid.length<2){host.replaceChildren(element('div','History begins with collection. Waiting for a second complete sample.','empty'));return;}
+ const host=$('history-chart'),history=backlog.samples,range=backlog.range;
+ const coverage=history.length?`Observed ${new Date(history[0].at*1000).toLocaleTimeString()} to ${new Date(history.at(-1).at*1000).toLocaleTimeString()} / ${number(history.length)} samples.`:'No recorded samples in this window.';
+ $('backlog-status').textContent=backlog.error?'History storage is unavailable.':backlog.loading?'Updating window...':coverage+(backlog.aggregated?` Summarized from ${number(backlog.total)} samples across this window. Each time bucket retains its first, last, minimum and maximum observations.`:'')+(backlog.truncated?` Showing the latest 240 of ${number(backlog.total)} samples. Narrow the window for full coverage.`:'');
+ if(backlog.error||!history.length||!range){host.replaceChildren(element('div',backlog.error?'History storage is unavailable.':backlog.loading?'Loading history...':'No recorded samples in this window.','empty'));host.onpointermove=host.onpointerdown=host.onpointerleave=host.onfocus=host.onblur=host.onkeydown=null;host.removeAttribute('tabindex');host.removeAttribute('aria-describedby');return;}
+ const valid=history.filter(h=>h.status==='complete' && h.summary.largest?.pending!=null);
+ if(!valid.length){host.replaceChildren(element('div','No complete backlog values in this window.','empty'));host.onpointermove=host.onpointerdown=host.onpointerleave=host.onfocus=host.onblur=host.onkeydown=null;host.removeAttribute('tabindex');host.removeAttribute('aria-describedby');return;}
  const NS='http://www.w3.org/2000/svg';const svg=document.createElementNS(NS,'svg');svg.setAttribute('viewBox','0 0 600 180');svg.setAttribute('role','img');svg.setAttribute('aria-label','Largest consumer backlog across collected samples');
  function shape(tag,attrs,text){const e=document.createElementNS(NS,tag);for(const [k,v]of Object.entries(attrs))e.setAttribute(k,v);if(text)e.textContent=text;svg.append(e);return e;}
- const max=Math.max(1,...valid.map(h=>h.summary.largest.pending))*1.1;const first=history[0].at,last=history.at(-1).at;const x=t=>48+(t-first)/Math.max(1,last-first)*540;const y=v=>140-v/max*125;
+ const max=Math.max(1,...valid.map(h=>h.summary.largest.pending))*1.1;const first=range.from,last=range.to;const x=t=>48+(t-first)/Math.max(1,last-first)*540;const y=v=>140-v/max*125;
  for(let i=0;i<4;i++){const value=max*i/3;shape('line',{x1:48,y1:y(value),x2:588,y2:y(value),class:'grid'});shape('text',{x:0,y:y(value)+3},new Intl.NumberFormat('en',{notation:'compact',maximumFractionDigits:0}).format(value));}
  let path='',previous=null;
- history.forEach(h=>{if(h.status!=='complete'||h.summary.largest?.pending==null){previous=null;return;}const gap=previous && h.at-previous.at>data.settings.refresh_seconds*3;path+=`${!previous||gap?'M':'L'}${x(h.at)} ${y(h.summary.largest.pending)} `;previous=h;});
- shape('path',{d:path,class:'line'});const end=valid.at(-1);shape('circle',{cx:x(end.at),cy:y(end.summary.largest.pending),r:3,class:'point'});
- shape('text',{x:48,y:169},new Date(first*1000).toLocaleTimeString());shape('text',{x:588,y:169,'text-anchor':'end'},new Date(last*1000).toLocaleTimeString());host.replaceChildren(svg);inspectChart(host,svg,history,x,y,shape);
+ history.forEach(h=>{if(h.status!=='complete'||h.summary.largest?.pending==null){previous=null;return;}const gap=previous && h.segment!==previous.segment;path+=`${!previous||gap?'M':'L'}${x(h.at)} ${y(h.summary.largest.pending)} `;previous=h;});
+ shape('path',{d:path,class:'line'});
+ valid.forEach((sample,index)=>{if((index===0||valid[index-1].segment!==sample.segment)&&(index===valid.length-1||valid[index+1].segment!==sample.segment)||index===valid.length-1)shape('circle',{cx:x(sample.at),cy:y(sample.summary.largest.pending),r:2.5,class:'point'});});
+ shape('text',{x:48,y:169},new Date(first*1000).toLocaleTimeString());shape('text',{x:588,y:169,'text-anchor':'end'},new Date(last*1000).toLocaleTimeString());host.replaceChildren(svg);inspectChart(host,svg,history,x,y,shape,range);
 }
 function renderAttention(){
  const host=$('attention-items');host.replaceChildren();const consumers=sortedConsumers();let count=0;
@@ -120,15 +144,14 @@ function render(){
  if(!settingsDirty){$('setting-threshold').value=data.settings.backlog_threshold;$('setting-refresh').value=data.settings.refresh_seconds;$('setting-retention').value=data.settings.retention_days;}
 }
 async function refresh(){
- if(busy)return;busy=true;$('refresh').disabled=true;
- try{const results=await Promise.allSettled([api('/api/snapshot'),api('/api/history'),api('/api/activity'),api('/api/incidents')]);
+ if(busy){refreshPending=true;return;}busy=true;$('refresh').disabled=true;
+ try{const results=await Promise.allSettled([api('/api/snapshot'),api('/api/history'),api('/api/activity'),api('/api/incidents'),loadBacklog()]);
  if(results[0].status==='rejected')throw results[0].reason;
  if(globalThis.acceptIncidents)acceptIncidents(results[3]);
  data=results[0].value;lastOk=Date.now();history=results[1].status==='fulfilled'?results[1].value:[];render();
- if(results[1].status==='rejected')empty('history-chart','History storage is unavailable.');
  if(results[2].status==='fulfilled'){$('activity-list').replaceChildren(...results[2].value.map(event=>{const row=element('div',null,'activity-row');row.append(element('time',new Date(event.at*1000).toLocaleString()),badge(event.kind),element('p',event.detail));return row;}));if(!results[2].value.length)empty('activity-list','No recorded activity for this workspace.');}else empty('activity-list','Activity storage is unavailable.');
  }catch(error){renderMonitorCoverage(data?.monitoring,true);$('collection-issues').replaceChildren(element('div',`Dashboard unavailable. ${lastOk?'Previously shown values are stale. ':''}${error.message}`,'issue'));$('mode').textContent='Disconnected';$('mode').className='badge warn';$('freshness').textContent=lastOk?`Last dashboard response ${new Date(lastOk).toLocaleTimeString()}`:'No dashboard response';}
- finally{busy=false;$('refresh').disabled=false;clearTimeout(timer);timer=setTimeout(refresh,3000);}
+ finally{busy=false;$('refresh').disabled=false;clearTimeout(timer);if(refreshPending){refreshPending=false;queueMicrotask(refresh);}else timer=setTimeout(refresh,globalThis.natsuiStreamLive?30000:3000);}
 }
 $('refresh').onclick=refresh;
 const flavors=[['','Original'],['neuronic','Neuronic'],['chlorophyll','Chlorophyll'],['crimson','Crimson'],['eosin','Eosin'],['azure','Azure'],['iris','Iris'],['carotene','Carotene']];

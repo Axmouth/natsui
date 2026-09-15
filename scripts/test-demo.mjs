@@ -61,3 +61,8 @@ for(const subject of ['dispatch.resize','telemetry.worker.cpu']){assert.ok(subs.
 assert.ok(subs.some(s=>s.qgroup==='dispatch-workers'&&NatsuiSubjects.matches(s.subject,'dispatch.resize')));
 assert.ok(!subs.some(s=>NatsuiSubjects.matches(s.subject,'unmatched.example')));
 console.log('Subject examples distinguish stream capture, Core NATS interest and unmatched subjects.');
+
+const now=Math.floor(Date.now()/1000), backlog=await api('/api/history/backlog?from='+(now-3600)+'&to='+now);
+assert.equal(backlog.truncated,false);assert.ok(backlog.samples.every(s=>s.interval_seconds===5&&Number.isInteger(s.segment)));
+assert.equal((await api('/api/monitoring/routes')).nodes.length,3);
+console.log('Simulated backlog window and route topology preserve the live API shape.');

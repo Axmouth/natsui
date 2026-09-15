@@ -88,8 +88,10 @@ try {
   await second.goto(base + '/#settings');
   await second.locator('.profile-select').selectOption('staging');
   await second.waitForURL(base + '/#overview');
+  await second.waitForFunction(() => document.querySelector('.profile-select')?.value === 'staging');
   assert.equal(await second.locator('.profile-select').inputValue(), 'staging');
   await page.reload();
+  await page.waitForFunction(() => document.querySelector('.profile-select')?.value === 'default');
   assert.equal(await page.locator('.profile-select').inputValue(), 'default');
   const initial = await request('/api/settings', undefined, 'default', 'GET');
   const staging = await request('/api/settings', undefined, 'staging', 'GET');

@@ -280,7 +280,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(401, {"error": "Authentication required"})
         if self.path != "/v1/status":
             return self.send(404, {"error": "Unknown operation"})
-        self.send(200, self.server.controller.status())
+        try:
+            self.send(200, self.server.controller.status())
+        except (ValueError, TypeError, OSError, subprocess.SubprocessError):
+            self.send(503, {"error": "Controller status unavailable. Inspect the protected store and configured authority."})
 
     def do_POST(self):
         if not self.authorized():

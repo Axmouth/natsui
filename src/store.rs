@@ -72,6 +72,7 @@ impl Database {
                 conn.execute_batch(&format!("BEGIN; ALTER TABLE {table} ADD COLUMN body_bytes INTEGER NOT NULL DEFAULT 0; UPDATE {table} SET body_bytes=length(CAST(body AS BLOB)); COMMIT;"))?;
             }
         }
+        conn.execute_batch("CREATE INDEX IF NOT EXISTS samples_backlog_cover ON samples(scope,demo,at,id,status,json_extract(body,'$.largest'),json_extract(body,'$.interval_seconds'));")?;
         conn.execute(
             "INSERT OR IGNORE INTO settings VALUES (1,?1)",
             [serde_json::to_string(&Settings::default())?],
@@ -187,6 +188,7 @@ impl Database {
     ) -> Result<(), String> {
         let settings = self.settings().await?;
         let mut summary = summarize(snapshot, settings.backlog_threshold);
+        summary["interval_seconds"] = json!(settings.refresh_seconds);
         summary["resources"] = crate::resources::project(snapshot, monitoring);
         // Compact summaries retain operational trends without retaining payloads
         // or serializing every stream and consumer configuration on each tick.
@@ -306,6 +308,31 @@ impl Database {
             Ok(json!({"from":from,"to":to,"total":total,"truncated":total>240,"samples":items}))
         }).await
     }
+    pub async fn backlog_history(
+        &self,
+        scope: &str,
+        demo: bool,
+        from: u64,
+        to: u64,
+    ) -> Result<Value, String> {
+        if from >= to || to - from > 21600 {
+            return Err("Choose an increasing time window of at most six hours".into());
+        }
+        let scope = scope.to_owned();
+        self.run("backlog_history", move |db| {
+            // Project only backlog evidence. Resource inventories can dwarf the chart data.
+            let mut statement = db.prepare("SELECT at,status,json_extract(body,'$.largest'),json_extract(body,'$.interval_seconds') FROM samples INDEXED BY samples_backlog_cover WHERE scope=?1 AND demo=?2 AND at>=?3 AND at<=?4 ORDER BY at,id LIMIT 20001").map_err(|e| e.to_string())?;
+            let rows = statement.query_map(params![scope,demo,from,to], |row| Ok((row.get::<_,u64>(0)?,row.get::<_,String>(1)?,row.get::<_,Option<String>>(2)?,row.get::<_,Option<u64>>(3)?))).map_err(|e| e.to_string())?;
+            let mut samples = Vec::new();
+            for row in rows {
+                if samples.len() == 20000 { return Err("Backlog source limit reached. Choose a narrower window.".into()); }
+                let (at,status,largest,cadence) = row.map_err(|e| e.to_string())?;
+                let largest = largest.map(|body| serde_json::from_str::<Value>(&body)).transpose().map_err(|e| e.to_string())?;
+                samples.push(json!({"at":at,"status":status,"summary":{"largest":largest},"interval_seconds":cadence}));
+            }
+            Ok(crate::backlog::aggregate(samples, from, to))
+        }).await
+    }
     pub async fn activity(&self, scope: &str, demo: bool) -> Result<Value, String> {
         let scope = scope.to_owned();
         self.run("activity", move|db| {
@@ -411,6 +438,44 @@ mod tests {
         );
         drop(db);
         std::fs::remove_dir_all(dir).unwrap();
+    }
+    #[tokio::test]
+    async fn backlog_projection_covers_range_without_resource_inventories() {
+        let dir =
+            std::env::temp_dir().join(format!("natsui-backlog-{}-{}", std::process::id(), now()));
+        let db = Database::open(dir.to_str().unwrap()).unwrap();
+        db.run("fixture", |db| {
+            for at in 0..600 {
+                let body=json!({"interval_seconds":1,"largest":{"pending":if at==123 {9999} else {at},"name":"worker"},"resources":{"payload":"must not leave SQLite"}}).to_string();
+                db.execute("INSERT INTO samples(scope,demo,at,status,body,body_bytes) VALUES('chart',1,?1,'complete',?2,?3)",params![at,body,body.len()]).unwrap();
+            }
+            let mut stmt=db.prepare("EXPLAIN SELECT at,status,json_extract(body,'$.largest'),json_extract(body,'$.interval_seconds') FROM samples INDEXED BY samples_backlog_cover WHERE scope='chart' AND demo=1 AND at>=0 AND at<=599 ORDER BY at,id LIMIT 20001").unwrap();
+            let opcodes=stmt.query_map([],|row|Ok((row.get::<_,String>(1)?,row.get::<_,i32>(2)?,row.get::<_,i32>(3)?))).unwrap().collect::<Result<Vec<_>,_>>().unwrap();
+            assert!(!opcodes.iter().any(|(op,_,_)|op=="Function"));
+            assert!(!opcodes.iter().any(|(op,cursor,_)|op=="Column"&&*cursor==0));
+            Ok(())
+        }).await.unwrap();
+        let result = db.backlog_history("chart", true, 0, 599).await.unwrap();
+        assert_eq!(result["total"], 600);
+        assert_eq!(
+            result["samples"].as_array().unwrap().first().unwrap()["at"],
+            0
+        );
+        assert_eq!(
+            result["samples"].as_array().unwrap().last().unwrap()["at"],
+            599
+        );
+        assert!(!result.to_string().contains("must not leave"));
+        assert_eq!(
+            db.backlog_history("chart", false, 0, 599).await.unwrap()["total"],
+            0
+        );
+        assert_eq!(
+            db.backlog_history("other", true, 0, 599).await.unwrap()["total"],
+            0
+        );
+        drop(db);
+        let _ = std::fs::remove_dir_all(dir);
     }
     #[tokio::test]
     async fn historical_windows_and_incidents_survive_migration() {

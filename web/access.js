@@ -68,7 +68,7 @@
     }
     list.replaceChildren(
       table(
-        [['User'], ['Role'], ['Status'], ['Actions']],
+        [['User'], ['Identity revision'], ['Role'], ['Status'], ['Actions']],
         result.users.map((row) => {
           const role = element('select');
           role.setAttribute('aria-label', 'Role for ' + row.id);
@@ -98,6 +98,7 @@
           }
           return [
             cell(row.id),
+            cell(String(row.identity_revision)),
             roleCell,
             cell(row.enabled ? 'Enabled' : 'Disabled'),
             actions,

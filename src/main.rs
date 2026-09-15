@@ -1,11 +1,14 @@
 mod auth;
+mod backlog;
 mod buckets;
 mod connection;
 mod editing;
+mod events;
 mod incidents;
 mod managed;
 mod messages;
 mod monitoring;
+mod oidc;
 mod operations;
 mod profiles;
 mod resources;
@@ -98,9 +101,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let dir = std::env::var("NATSUI_DATA_DIR").unwrap_or("data".into());
     let db = store::Database::open(&dir)?;
     auth.open_users(std::path::Path::new(&dir))?;
+    if let Some(path) = std::env::var_os("NATSUI_ACCESS_POLICY_FILE") {
+        use std::io::Read;
+        let mut bytes = Vec::new();
+        std::fs::File::open(path)?
+            .take(65537)
+            .read_to_end(&mut bytes)?;
+        auth.configure_policy(&bytes)?;
+    }
     if let Ok(origin) = std::env::var("NATSUI_PUBLIC_URL") {
         auth.configure_origin(&origin)?;
     }
+    oidc::initialize(&auth)?;
     let settings_cache = Arc::new(RwLock::new(db.settings().await?));
     let connection = if demo {
         None
@@ -357,10 +369,33 @@ fn application_routes(app: App) -> Router {
                 )
             }),
         )
+        .route(
+            "/workspace-extras.js",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/javascript")],
+                    include_str!("../web/workspace-extras.js"),
+                )
+            }),
+        )
         .route("/api/nodes/{index}/connections", get(node_connections))
         .route("/api/snapshot", get(snapshot))
+        .route("/api/events", get(events::updates))
+        .route(
+            "/oidc-complete.js",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/javascript")],
+                    "location.replace('/');",
+                )
+            }),
+        )
+        .route("/api/auth/oidc", get(oidc::available))
+        .route("/api/auth/oidc/start", get(oidc::start))
+        .route("/api/auth/oidc/callback", get(oidc::callback))
         .route("/api/history", get(history))
         .route("/api/history/window", get(history_window))
+        .route("/api/history/backlog", get(backlog_history))
         .route("/api/activity", get(activity))
         .route("/api/incidents", get(incident_history))
         .route("/api/monitoring/{kind}", get(monitor_inventory))
@@ -484,6 +519,7 @@ async fn snapshot(State(app): State<App>) -> Json<Value> {
 async fn readiness(State(app): State<App>) -> (StatusCode, Json<Value>) {
     let state = app.current.read().await;
     let health = app.db.health();
+
     let interval = app.settings_cache.read().await.refresh_seconds;
     let fresh = telemetry::now().saturating_sub(state.observed_at) <= interval * 3 + 20;
     let ready = state.status == "complete" && fresh && health["status"] == "ok";
@@ -525,6 +561,16 @@ async fn history_window(
     }
     app.db
         .history_window(&app.scope, app.demo, query.from, query.to)
+        .await
+        .map(Json)
+        .map_err(|e| (StatusCode::BAD_REQUEST, e))
+}
+async fn backlog_history(
+    State(app): State<App>,
+    Query(query): Query<HistoryWindow>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    app.db
+        .backlog_history(&app.scope, app.demo, query.from, query.to)
         .await
         .map(Json)
         .map_err(|e| (StatusCode::BAD_REQUEST, e))

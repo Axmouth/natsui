@@ -35,7 +35,7 @@ Single-node restarts interrupt service. Cluster changes require separate rolling
 
 ## Dashboard users
 
-Settings supports generated access-key identities with viewer, operator and admin roles. Viewer can inspect observations and retained payloads. Operator can also perform enabled native NATS mutations. Admin can manage dashboard identities, settings and explicitly configured controllers. All roles share the configured profiles. Per-profile restrictions, separate payload grants, passwords, OIDC and multi-factor authentication remain future extensions.
+Settings supports generated access-key identities with viewer, operator and admin roles. Viewer can inspect observations and retained payloads. Operator can also perform enabled native NATS mutations. Admin can manage dashboard identities, settings and explicitly configured controllers. Optional profile membership restricts named users. Explicit OIDC mappings enable provider sign-in with the same local roles. Separate payload grants and local password/MFA accounts remain outside this implementation. Global administrators retain user and controller management authority.
 
 Authorization is enforced on backend routes. SQLite user changes run outside async workers. Identity checks use a bounded cache refreshed by successful changes. Persistent monotonically increasing revisions reject stale user-management forms across account recreation. Sessions and one-time tickets also bind to the credential digest.
 

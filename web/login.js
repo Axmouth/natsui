@@ -79,3 +79,5 @@ if (ticket) {
     }
   })();
 }
+
+fetch('/api/auth/oidc').then(response=>response.ok?response.json():null).then(config=>{document.getElementById('oidc-login').hidden=!config?.enabled;}).catch(()=>{});

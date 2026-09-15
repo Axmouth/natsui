@@ -18,6 +18,7 @@ COPY compose.yaml ./compose.yaml
 RUN --mount=type=cache,target=/usr/local/cargo/registry --mount=type=cache,target=/app/target \
     NATSUI_TLS_FIXTURES="$(node scripts/tls-fixtures.mjs)" NATSUI_TEST_SERVER=/usr/local/bin/nats-server cargo test --locked -- --include-ignored \
     && node scripts/test-ui-contract.mjs && node scripts/smoke-monitor-security.mjs /app/natsui \
+    && node scripts/smoke-oidc.mjs /app/natsui && node scripts/smoke-workspace.mjs /app/natsui \
     && node scripts/test-trends.mjs && node scripts/test-demo.mjs && node scripts/package.mjs
 
 FROM debian:bookworm-slim

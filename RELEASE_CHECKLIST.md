@@ -31,15 +31,15 @@ NATS Server 2.11.8 is a compatibility test baseline, not a claim that it is the 
 
 ## Before publication
 
-- Complete and review a 24-hour endurance report. a started or short run is not a completed soak.
-- Run the prepared CI workflow on a chosen GitHub repository. macOS and additional native architectures require successful runner results before support claims.
-- Source repository: https://github.com/Axmouth/natsui. The repository publication workflow produces images and the Pages demo after verification. This working-tree increment has not yet been published.
+- Partial endurance evidence was accepted for the current release scope on 2026-09-15. A continuous 24-hour pass remains unverified.
+- Verify the exact main commit on the Windows, Linux and macOS CI runners before treating its native packages as available.
+- Source repository: https://github.com/Axmouth/natsui. The repository publication workflow produces images and the Pages demo after verification. The current public deployment is identified by the successful main-branch publication run.
 - Have fresh users follow the quick start and investigate actual operational questions. Record installation failures and confusing evidence semantics.
 - Review broker compatibility beyond the tested baseline, including deployment-specific account/JWT policies.
 
 ## Deferred beyond the local beta
 
-Per-profile authorization, separate payload grants, OIDC and JWT operator management remain separate extensions. Named access-key identities, explicit HTTPS proxy deployment, reviewed native resource operations and an opt-in controller are implemented. The controller does not perform coordinated cluster rollout or claim quorum safety.
+Separate payload grants, automatic identity provisioning and coordinated broker rollout remain extensions. Profile membership, explicit OIDC mapping and bounded JWT account administration are implemented. Named access-key identities, explicit HTTPS proxy deployment, reviewed native resource operations and an opt-in controller are implemented. The controller does not perform coordinated cluster rollout or claim quorum safety.
 
 ## Publishing
 
@@ -63,3 +63,26 @@ Per-profile authorization, separate payload grants, OIDC and JWT operator manage
 - Native monitoring integration passed for private CA, mTLS, Basic/Bearer isolation, missing credentials, untrusted certificates and redirect rejection.
 - The UI route contract checks literal calls against registered backend routes. It complements browser checks and does not verify response shapes or browser behavior.
 - The durable browser regression passed against the final runtime and a fresh authenticated cluster. It covers one-time login, per-tab profiles, isolated settings, create/publish/delete operations, named viewer restrictions and recovery when only the default profile remains. CI includes this workflow. A completed short test does not qualify as a 24-hour run.
+
+## Endurance interruption, 2026-09-15
+
+The shared-deployment recorder captured 757 healthy samples from 2026-09-14 17:04:39 UTC through 23:40:55 UTC, spanning 6 hours 36 minutes 17 seconds. Readiness and monitoring were complete throughout these samples. Maximum recorded request latency was 47 ms and maximum dashboard container memory was 111.9 MiB. These observations do not establish a memory plateau or a 24-hour pass.
+
+Windows Power-Troubleshooter event 1 confirms host sleep from 2026-09-14 23:41:20 UTC until 2026-09-15 06:20:00 UTC. One in-flight sample recorded an unavailable response and 23,911,837 ms elapsed latency across the suspension. That value includes host suspension and is not an active request-service latency measurement. Sampling resumed with healthy readiness and complete monitoring after wake.
+
+Evidence remains in data/soak/2026-09-14-shared-deployment.jsonl and its summary. The recorder's elapsed time and eventual completion flag use wall-clock time, so they cannot certify uninterrupted operation across this sleep interval. The partial evidence was accepted for the current scope on 2026-09-15. A future uninterrupted 24-hour recording requires a host that stays awake. The follow-up remains paused.
+
+
+## Investigation and identity follow-up, 2026-09-15
+
+- Rust 1.94 strict Clippy passed on Windows. All 43 locally applicable tests passed, with six real-broker cases covered by the full 49-test Linux container suite.
+- Backlog tests cover retained peaks, omitted failures, historical cadence changes, legacy rows, full-range selection, profile separation and index-only projection without parsing resource inventories.
+- OIDC tests use a disposable HTTPS provider and signed RSA tokens. Wrong issuer/audience/nonce/expiry/authorized-party values, bad signatures, replay, wrong browser cookie, unmapped subjects, disabled users and replacement identities are rejected. A real browser traverses two HTTPS sites and reaches the dashboard with a Secure, Strict session.
+- Workspace tests exercise saved-view persistence, superseded range requests, coalesced refresh, notification delivery across tabs, the 128-stream SSE limit and permit release after disconnect.
+- Both optional controllers pass Docker integration tests. The NSC authority test proves that local revocation preserves broker access until a TLS resolver accepts the updated JWT, after which a new connection is rejected. Missing operator authority prevents revocation while account-only user creation still works. Contended operations reject immediately without a deferred mutation.
+- Static demo and Pages link/network-isolation checks pass with the new shared browser module and identity setup guides.
+- An independent adversarial review identified historical continuity, cross-tab timing, identity-generation and controller authority/deadline issues. Corrections and durable regression coverage are included. The review found no need for an architectural rewrite.
+
+Remaining limits are deliberate: notifications need an open browser, OIDC does not synchronize groups or provider logout, JWT resolver acceptance does not prove cluster-wide convergence, and managed process changes do not coordinate a cluster rollout. The accepted partial endurance evidence is unchanged.
+
+Final local release checks also passed the Windows archive, release-build OIDC/workspace browser suites and the existing authenticated three-node cluster browser workflow. The latter waits for asynchronously populated profile options after navigation.

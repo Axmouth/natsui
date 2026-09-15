@@ -29,9 +29,16 @@
         '/api/managed/' + encodeURIComponent(node()) + '/status',
       );
       $('managed-current').textContent = JSON.stringify(current, null, 2);
-      status.textContent = current.running
-        ? 'NATS process running. Configured and observed settings are shown separately.'
-        : 'NATS process stopped.';
+      const jwt = current.identity_model === 'jwt-account';
+      setExamples(jwt);
+      $('managed-credential-note').textContent = jwt
+        ? 'Signed credentials may work immediately wherever the account is trusted. Local revocations require distribution before broker access changes.'
+        : 'Credentials are generated when omitted. An optional 64-character hexadecimal password can provision the same credential on another node. Passwords are stored as bcrypt hashes by the controller.';
+      status.textContent = jwt
+        ? 'JWT account authority. Local changes and resolver acceptance are reported separately.'
+        : current.running
+          ? 'NATS process running. Configured and observed settings are shown separately.'
+          : 'NATS process stopped.';
       form.hidden = false;
     } catch (e) {
       current = null;
@@ -52,9 +59,11 @@
       value.revision = current.revision;
       preview = await send('preview', value);
       $('managed-diff').textContent = JSON.stringify(preview, null, 2);
+      $('managed-confirm-label').textContent =
+        'Type ' + (preview.confirmation || 'APPLY') + ' to confirm';
       review.hidden = false;
       status.textContent =
-        'Validated configuration. Review the effects before applying.';
+        'Operation reviewed. Check the effects and confirmation text before applying.';
     } catch (e) {
       status.textContent = e.message;
     } finally {
@@ -104,9 +113,35 @@
     delete_user: { action: 'delete_user', name: 'app-reader' },
     restart: { action: 'restart' },
   };
+  const jwtExamples = {
+    create_user: {
+      action: 'create_user',
+      name: 'app-reader',
+      expiry_hours: 24,
+      permissions: { publish: [], subscribe: ['app.>'] },
+    },
+    revoke_user: { action: 'revoke_user', name: 'app-reader' },
+    export_account: { action: 'export_account' },
+    publish_account: { action: 'publish_account' },
+  };
+  let activeExamples = examples,
+    exampleMode = null;
+  function setExamples(jwt) {
+    if (exampleMode === jwt) return;
+    exampleMode = jwt;
+    activeExamples = jwt ? jwtExamples : examples;
+    $('managed-example').replaceChildren(
+      ...Object.keys(activeExamples).map((key) => {
+        const option = element('option', key.replaceAll('_', ' '));
+        option.value = key;
+        return option;
+      }),
+    );
+    $('managed-example').onchange();
+  }
   $('managed-example').onchange = () => {
     $('managed-proposal').value = JSON.stringify(
-      examples[$('managed-example').value],
+      activeExamples[$('managed-example').value],
       null,
       2,
     );

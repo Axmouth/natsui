@@ -1,0 +1,18 @@
+FROM golang:1.26-alpine AS nsc
+RUN go install github.com/nats-io/nsc/v2@v2.14.0
+FROM alpine:3.23 AS runtime
+RUN apk add --no-cache python3 py3-bcrypt ca-certificates && addgroup -g 10001 natsui && adduser -D -u 10001 -G natsui natsui && mkdir /data && chown 10001:10001 /data
+COPY --from=nsc /go/bin/nsc /usr/local/bin/nsc
+COPY server.py jwt_server.py /opt/natsui-controller/
+USER 10001:10001
+EXPOSE 9443
+ENTRYPOINT ["python3", "/opt/natsui-controller/jwt_server.py"]
+FROM runtime AS verification
+USER root
+RUN apk add --no-cache openssl
+COPY --from=nats:2.11.8-alpine /usr/local/bin/nats-server /usr/local/bin/nats-server
+USER 10001:10001
+COPY test_jwt.py /opt/natsui-controller/test_jwt.py
+RUN python3 /opt/natsui-controller/test_jwt.py
+
+FROM runtime

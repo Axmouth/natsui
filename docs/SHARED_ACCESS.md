@@ -25,7 +25,7 @@ Settings contains Dashboard users when authentication is enabled. A bootstrap-ke
 
 Role changes, disabling, deletion and key rotation invalidate that user's sessions and outstanding login tickets. Re-enabling a user does not revive old sessions. Revision checks reject updates made from stale user lists. The bootstrap key remains a recovery administrator and cannot be deleted through the user table. Rotating that key requires replacing its protected file and restarting the dashboard, as in the Ansible guide.
 
-Named user records contain key digests, roles and revisions in access.sqlite3 inside NATSUI_DATA_DIR. Permanent user keys are never stored in plaintext. The entire data directory must persist and be included in stopped backups. Access-key identities are not password accounts, OIDC, or multi-factor authentication. All configured profiles use the same dashboard identity store.
+Named user records contain key digests, roles and revisions in access.sqlite3 inside NATSUI_DATA_DIR. Permanent user keys are never stored in plaintext. The entire data directory must persist and be included in stopped backups. Access keys are not human passwords or multi-factor authentication. Optional [OIDC sign-in](OIDC.md) maps explicitly configured provider subjects to these same local users. All configured profiles use the same dashboard identity store. Optional [profile membership](PROFILES.md) restricts resource access.
 
 ## HTTPS through a trusted reverse proxy
 

@@ -4,7 +4,7 @@ The dashboard runs beside an existing NATS server. SQLite is embedded. No databa
 
 ## Extended deployment options
 
-[Shared dashboard users and HTTPS](SHARED_ACCESS.md), [monitoring certificates and credentials](MONITORING_SECURITY.md), [multiple profiles](PROFILES.md) and [optional managed NATS users/settings](MANAGED.md) have dedicated guides. The local demo remains unauthenticated. Explicit configuration enables each production capability.
+[Shared dashboard users and HTTPS](SHARED_ACCESS.md), [monitoring certificates and credentials](MONITORING_SECURITY.md), [multiple profiles](PROFILES.md) and [optional managed NATS users/settings](MANAGED.md), [OIDC sign-in](OIDC.md) and [JWT account authority](JWT_AUTHORITY.md) have dedicated guides. The local demo remains unauthenticated. Explicit configuration enables each production capability.
 
 ## Ansible deployment
 
@@ -18,12 +18,6 @@ Generate an access key into a separate named volume. This command refuses to ove
 
 ```sh
 docker run --rm -v natsui-auth:/data ghcr.io/axmouth/natsui:latest --init-auth /data/access.key
-```
-
-Read the key locally for sign-in. This deliberately displays a secret. The output belongs in a password manager, not logs or source control:
-
-```sh
-docker run --rm --entrypoint cat -v natsui-auth:/data:ro ghcr.io/axmouth/natsui:latest /data/access.key
 ```
 
 Start the dashboard with separate mounts for history and the read-only secret:
@@ -291,7 +285,7 @@ A native process outside Docker usually cannot resolve Compose service names. Us
 
 ## Verify the connection and troubleshoot
 
-Open http://127.0.0.1:4321 and sign in with the dashboard access key. Check the cluster connection status and stream inventory, then open Nodes. Three successful monitoring endpoints should show 3/3 reporting. Empty inventory can be valid for a new application account. An unavailable/error status is not an empty cluster. Existing streams should match the selected NATS account and JetStream domain. HTTP readiness alone is not proof of broker access or healthy monitoring.
+Run docker exec natsui natsui login, or the equivalent Compose exec command, and open the one-time link. Check the cluster connection status and stream inventory, then open Nodes. Three successful monitoring endpoints should show 3/3 reporting. Empty inventory can be valid for a new application account. An unavailable/error status is not an empty cluster. Existing streams should match the selected NATS account and JetStream domain. HTTP readiness alone is not proof of broker access or healthy monitoring.
 
 Use the same Compose file list as the selected start command when inspecting, updating or stopping the deployment. For example, the full mutual TLS/JWT recipe uses:
 
@@ -300,20 +294,20 @@ docker compose --env-file .env -f compose.network.yaml -f compose.tls.yaml -f co
 docker compose --env-file .env -f compose.network.yaml -f compose.tls.yaml -f compose.mtls.yaml -f compose.creds.yaml logs --tail 50 dashboard
 ```
 
-The HTTP monitoring connection is independent of NATS authentication and TLS. NATSUI_MONITOR_URLS supports ordinary HTTP and HTTPS with standard trust, but does not support HTTP credentials, custom monitoring CAs, or monitoring client certificates. NATSUI_TLS_* applies only to the broker connection. Keep unauthenticated monitoring on the private network. Do not publish its ports merely to make Natsui reach it. A protected monitoring endpoint can remain unconfigured while JetStream inventory works.
+The HTTP monitoring connection is independent of NATS authentication and TLS. NATSUI_MONITOR_URLS supports ordinary HTTP and HTTPS with standard trust, but does not support HTTP credentials, custom monitoring CAs, or monitoring client certificates. NATSUI_TLS_* applies only to the broker connection. Private CAs, mutual TLS and HTTP credentials are supported through NATSUI_MONITOR_CONFIG_FILE, described in the [monitoring security guide](MONITORING_SECURITY.md). Keep unauthenticated monitoring on the private network. Do not publish its ports merely to make Natsui reach it. A protected monitoring endpoint can remain unconfigured while JetStream inventory works.
 
 - Network not found: check the network name from docker inspect and whether the broker stack is running. The external network is not created by this recipe.
 - Connection timeout: check the service alias, container listening port, network membership and advertised peer addresses. At least one configured seed must complete the NATS connection handshake.
 - TLS failure: check certificate expiry, trusted CA bundle, server names, client certificate purpose and matching private key. Do not disable verification to bypass a mismatch.
 - Authentication or permission failure: check that the NATS identity is accepted on every peer, belongs to the intended account and can make the required JetStream requests. A dashboard login key cannot authenticate to NATS.
-- Streams work but nodes do not: check monitoring ports and the independent HTTP authentication/TLS limitations. A partial reporting count identifies unavailable configured endpoints, not necessarily a failed broker.
+- Streams work but nodes do not: check monitoring ports and the independent HTTP authentication/TLS configuration. A partial reporting count identifies unavailable configured endpoints, not necessarily a failed broker.
 - Missing file or permission denied: check that source files exist as files beside the Compose file and are readable by UID 10001. Container environment paths must match the mount targets, not host paths.
 - Profile already bound: select a new NATSUI_PROFILE after a connection identity change. Keep the existing data volume and its history.
 - Dashboard port already in use: stop the earlier dashboard or change only the host side of the mapping, for example 127.0.0.1:4322:4321, and open that port.
 
 To apply changed environment settings or mounted credentials, repeat the selected start command with --force-recreate. This reloads startup configuration and invalidates dashboard sessions. Keep the same history volume. Credential-file/client-certificate changes require a new profile name under the current identity guard. To stop, replace up -d --wait with down in that command. Omit -v to retain history. Pin a published image digest instead of latest when a repeatable deployment version is required.
 
-NATS user creation and management remain planned. Dashboard login, broker credentials, TLS certificates and SQLite history are distinct resources. Sources: [NATS configuration management](https://docs.nats.io/learn/deployment/config-management) and [NATS JWT administration](https://github.com/nats-io/nats.docs/blob/master/running-a-nats-service/nats_admin/jwt.md).
+Config-based NATS users use the optional process controller. JWT users use the optional account authority. Dashboard login, broker credentials, TLS certificates and SQLite history are distinct resources. Sources: [NATS configuration management](https://docs.nats.io/learn/deployment/config-management) and [NATS JWT administration](https://github.com/nats-io/nats.docs/blob/master/running-a-nats-service/nats_admin/jwt.md).
 
 ## Native binary
 
@@ -339,19 +333,19 @@ export NATSUI_PROFILE=production-observer
 ./natsui
 ```
 
-Subsequent starts reuse the existing key. Read its file locally for sign-in and restrict secret-directory access with OS permissions.
+Subsequent starts reuse the existing key. The natsui login command opens the shorter sign-in path. Restrict secret-directory access with OS permissions.
 
 ## Login behavior
 
 Named dashboard users, roles and one-time login links are described in the [shared-access guide](SHARED_ACCESS.md). The configured key is a recovery administrator.
 
-- NATSUI_AUTH_TOKEN_FILE enables a single-operator access-key login. An unset variable retains trusted local access. An empty, unreadable or malformed configured file fails startup.
+- NATSUI_AUTH_TOKEN_FILE enables dashboard authentication and the bootstrap recovery administrator. An unset variable retains trusted local access. An empty, unreadable or malformed configured file fails startup.
 - --init-auth generates 256 random bits encoded as 64 hexadecimal characters. It does not create a human password or a NATS credential. The process retains a SHA-256 digest for comparison, not the raw access key.
 - Sign-in creates an HttpOnly, SameSite=Strict cookie. Sessions expire after eight hours, are revoked by Sign out, and are all invalidated by a process restart. At most 32 sessions are retained. The oldest is evicted when full.
 - Sign-in accepts at most 30 attempts per minute across the instance. Requests have a 1 KiB body limit. Mutation requests still require the same-origin request header and existing Host/Origin checks.
-- All holders of the access key have the same configured dashboard capabilities. Separate accounts, roles, per-user audit attribution and OIDC are not implemented. Configuration audit entries still identify a local operator.
+- All holders of the bootstrap key are recovery administrators. Named viewer/operator/admin identities provide separate keys, session revocation and audit attribution. Optional OIDC maps provider subjects to those identities.
 - Login assets and the minimal health/readiness endpoints are public. Inventory, payload inspection, exports, settings and editing APIs require a valid session when authentication is enabled.
-- The cookie is for the existing HTTP loopback deployment and has no Secure flag. This does not enable public HTTP or reverse-proxy deployment. Remote HTTPS, explicit public origins and team authorization remain separate work. HTTP secrets must not be sent over an untrusted network.
+- Local HTTP uses loopback cookies. NATSUI_PUBLIC_URL configures an explicit HTTPS origin behind a trusted reverse proxy and enables Secure cookies. Public HTTP is unsupported.
 - The static browser demo has no backend and no login. It contains no real broker credentials or data.
 
 ### Rotation and recovery
@@ -364,7 +358,7 @@ Loss of the access key does not require deleting SQLite history. The host or Doc
 
 The image sets NATSUI_DATA_DIR=/data. The native binary defaults to ./data relative to its working directory. The database is natsui.sqlite3, with natsui.sqlite3-wal and natsui.sqlite3-shm potentially present beside it.
 
-**Mount the entire directory, not just natsui.sqlite3.** The writable volume stores observations, dashboard settings, activity, incidents and profile bindings. Message payloads are fetched on demand and are not stored by Natsui. The access key belongs in its separate secret mount. Sessions are deliberately memory-only.
+**Mount the entire directory, not just natsui.sqlite3.** The writable volume stores observations, dashboard settings, activity, incidents, profile bindings and dashboard identities in access.sqlite3. Additional profile databases live under profiles/. Message payloads are fetched on demand and are not stored by Natsui. The access key belongs in its separate secret mount. Sessions are deliberately memory-only.
 
 | Deployment | Persistent mount | Lifecycle |
 | --- | --- | --- |

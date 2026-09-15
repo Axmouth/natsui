@@ -39,6 +39,7 @@ struct Profile {
 }
 #[derive(Clone)]
 struct Registry {
+    auth: auth::Auth,
     routes: Arc<BTreeMap<String, (String, Router)>>,
 }
 fn valid_id(id: &str) -> bool {
@@ -135,6 +136,7 @@ pub async fn router(base: App, directory: &str) -> Result<Router, Box<dyn std::e
         }
     }
     let registry = Registry {
+        auth: base.auth.clone(),
         routes: Arc::new(apps),
     };
     Ok(Router::new()
@@ -156,7 +158,7 @@ pub async fn router(base: App, directory: &str) -> Result<Router, Box<dyn std::e
 }
 async fn list(State(registry): State<Registry>, headers: HeaderMap) -> Json<Value> {
     Json(
-        json!({"selected":selected(&headers),"profiles":registry.routes.iter().map(|(id,(name,_))|json!({"id":id,"name":name})).collect::<Vec<_>>() }),
+        json!({"selected":selected(&headers),"profiles":registry.routes.iter().filter(|(id,_)|registry.auth.allowed_profile(&headers,id)).map(|(id,(name,_))|json!({"id":id,"name":name})).collect::<Vec<_>>() }),
     )
 }
 #[derive(Deserialize)]
@@ -164,14 +166,31 @@ async fn list(State(registry): State<Registry>, headers: HeaderMap) -> Json<Valu
 struct Selection {
     id: String,
 }
-async fn select(State(registry): State<Registry>, Json(selection): Json<Selection>) -> Response {
+async fn select(
+    State(registry): State<Registry>,
+    headers: HeaderMap,
+    Json(selection): Json<Selection>,
+) -> Response {
     if !registry.routes.contains_key(&selection.id) {
         return StatusCode::NOT_FOUND.into_response();
+    }
+    if !registry.auth.allowed_profile(&headers, &selection.id) {
+        return StatusCode::FORBIDDEN.into_response();
     }
     StatusCode::NO_CONTENT.into_response()
 }
 async fn dispatch(State(registry): State<Registry>, request: Request) -> Response {
-    let id = if request.uri().path().starts_with("/api/") {
+    let path = request.uri().path();
+    let scoped = path.starts_with("/api/")
+        && ![
+            "/api/auth/",
+            "/api/users",
+            "/api/managed",
+            "/api/nats-users",
+        ]
+        .iter()
+        .any(|prefix| path.starts_with(prefix));
+    let id = if scoped {
         selected(request.headers())
     } else {
         "default".into()
@@ -183,6 +202,13 @@ async fn dispatch(State(registry): State<Registry>, request: Request) -> Respons
         )
             .into_response();
     };
+    if scoped && !registry.auth.allowed_profile(request.headers(), &id) {
+        return (
+            StatusCode::FORBIDDEN,
+            "Access to this profile is not granted.",
+        )
+            .into_response();
+    }
     match route.clone().oneshot(request).await {
         Ok(response) => response,
         Err(never) => match never {},
@@ -212,6 +238,7 @@ mod tests {
             ),
         ]);
         let registry = Registry {
+            auth: auth::Auth::disabled(),
             routes: Arc::new(routes),
         };
         for (profile, expected) in [
@@ -235,6 +262,7 @@ mod tests {
         assert_eq!(
             select(
                 State(registry.clone()),
+                HeaderMap::new(),
                 Json(Selection {
                     id: "unknown".into()
                 })
@@ -246,6 +274,7 @@ mod tests {
         assert_eq!(
             select(
                 State(registry.clone()),
+                HeaderMap::new(),
                 Json(Selection { id: "stage".into() })
             )
             .await

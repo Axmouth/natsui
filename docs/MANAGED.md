@@ -2,7 +2,7 @@
 
 Standard Natsui attaches to unmodified NATS and does not own server files. The optional controller is a separate image that starts one NATS process and owns its JSON configuration. It has no Docker socket and cannot restart sibling containers or modify unrelated servers.
 
-This adapter supports config-based authorization.users. JWT operators, resolvers and config-based accounts blocks remain outside this adapter. Existing identity tooling remains authoritative for those deployments.
+This adapter supports config-based authorization.users. Config-based accounts blocks remain outside this adapter. JWT user issuance, revocation, export and optional resolver publication use the separate [JWT account authority](JWT_AUTHORITY.md).
 
 ## Build the controller
 

@@ -157,7 +157,7 @@ impl Monitor {
     }
 
     pub async fn inventory(&self, kind: &str, page: usize) -> Result<Value, String> {
-        if !["connections", "subscriptions"].contains(&kind) || page > 10000 {
+        if !["connections", "subscriptions", "routes"].contains(&kind) || page > 10000 {
             return Err("Unsupported inventory or page".into());
         }
         let current = self.current.read().await.clone();
@@ -171,10 +171,10 @@ impl Monitor {
                 .cloned()
                 .unwrap_or(json!({}));
             tasks.spawn(async move {
-                let path = if kind=="connections" {format!("connz?subs=1&limit=100&offset={}",page*100)} else {format!("subsz?subs=1&limit=100&offset={}",page*100)};
+                let path = if kind=="routes" {"routez?subs=0".into()} else if kind=="connections" {format!("connz?subs=1&limit=100&offset={}",page*100)} else {format!("subsz?subs=1&limit=100&offset={}",page*100)};
                 let mut node=json!({"slot":index,"name":identity["server_name"],"server_id":identity["server_id"],"start":identity["start"],"at":crate::telemetry::now()});
                 match monitor.get(index,&path).await.and_then(|raw| project_inventory(&kind,&raw)) {
-                    Ok(result)=>{node["status"]="complete".into();node["rows"]=result["rows"].clone();node["total"]=result["total"].clone();}
+                    Ok(result)=>{if kind=="routes" {node["server_id"]=result["server_id"].clone();node["name"]=result["server_name"].clone();node["start"]=Value::Null;}node["status"]=if result["truncated"]==true {"partial"}else{"complete"}.into();node["rows"]=result["rows"].clone();node["total"]=result["total"].clone();}
                     Err(error)=>{node["status"]="unavailable".into();node["error"]=error.into();}
                 }
                 node
@@ -306,6 +306,44 @@ impl Monitor {
     }
 }
 fn project_inventory(kind: &str, raw: &Value) -> Result<Value, String> {
+    if kind == "routes" {
+        let rows = raw["routes"]
+            .as_array()
+            .ok_or("Route inventory unavailable")?;
+        let total = raw["num_routes"]
+            .as_u64()
+            .ok_or("Route count unavailable")?;
+        let rows: Vec<Value> = rows
+            .iter()
+            .take(100)
+            .map(|row| {
+                let mut projected = serde_json::Map::new();
+                for key in [
+                    "rid",
+                    "remote_id",
+                    "remote_name",
+                    "did_solicit",
+                    "is_configured",
+                    "start",
+                    "rtt",
+                    "pending_size",
+                    "in_msgs",
+                    "out_msgs",
+                    "in_bytes",
+                    "out_bytes",
+                    "subscriptions",
+                ] {
+                    if let Some(value) = row.get(key) {
+                        projected.insert(key.into(), value.clone());
+                    }
+                }
+                Value::Object(projected)
+            })
+            .collect();
+        return Ok(
+            json!({"server_id":raw["server_id"],"server_name":raw["server_name"],"total":total,"truncated":total>rows.len() as u64,"rows":rows}),
+        );
+    }
     let key = if kind == "connections" {
         "connections"
     } else {

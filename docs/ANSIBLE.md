@@ -141,3 +141,10 @@ The backup directory must already exist and be protected. Check archive success 
 The provided playbook covers the common observer deployment, dashboard authentication and NATS transport TLS. Profile JSON, HTTPS monitoring endpoint files and controller credentials use the same Vault-backed copy and read-only mount pattern. Their environment variables and volume targets are shown in the linked [profile](PROFILES.md), [monitoring](MONITORING_SECURITY.md) and [controller](MANAGED.md) guides. These optional settings require extending the template and secret file list. The playbook does not infer them from NATS discovery.
 
 For NATSUI_PUBLIC_URL deployments, the unauthenticated API check must send the configured public Host header and still expect 401. The loopback /readyz check remains unchanged. Secret and certificate replacement must continue to notify container recreation.
+
+
+## Optional SSO and profile policy files
+
+The [OIDC guide](OIDC.md) and [profile policy guide](PROFILES.md) use deployment-owned JSON files. Provision the JSON and client secret with Vault-backed copy tasks, mode '0400', owner '10001', group '10001' and no_log: true. Add read-only mounts and NATSUI_OIDC_CONFIG_FILE or NATSUI_ACCESS_POLICY_FILE to the Compose template. Notify the existing recreation handler when either changes. The bootstrap key remains available for unattended recovery.
+
+The [JWT authority](JWT_AUTHORITY.md) requires its own service, exclusive persistent NSC store, signing keys and independent TLS/token files. The observer playbook does not provision or infer this signing authority. Its store backup and key distribution require explicit deployment tasks.

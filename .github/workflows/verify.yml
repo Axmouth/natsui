@@ -41,8 +41,17 @@ jobs:
         run: |
           cargo build --release --locked
           node scripts/smoke-monitor-security.mjs target/release/natsui${{ runner.os == 'Windows' && '.exe' || '' }}
+          node scripts/smoke-oidc.mjs target/release/natsui${{ runner.os == 'Windows' && '.exe' || '' }}
+          node scripts/smoke-workspace.mjs target/release/natsui${{ runner.os == 'Windows' && '.exe' || '' }}
           node scripts/package.mjs
           node scripts/test-site.mjs
+      - name: Browser identity and workspace regressions
+        if: runner.os == 'Linux'
+        run: |
+          npm install --no-save --package-lock=false playwright@1.62.1
+          npx playwright install --with-deps chromium
+          NATSUI_OIDC_BROWSER=1 node scripts/smoke-oidc.mjs target/release/natsui
+          NATSUI_WORKSPACE_BROWSER=1 node scripts/smoke-workspace.mjs target/release/natsui
       - uses: actions/upload-artifact@v4
         with:
           name: natsui-${{ runner.os }}-${{ runner.arch }}
@@ -90,3 +99,4 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: docker build --target verification -t natsui-controller:verified controller
+      - run: docker build -f controller/Dockerfile.jwt --target verification -t natsui-jwt:verified controller

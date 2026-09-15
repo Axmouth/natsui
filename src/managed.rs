@@ -100,7 +100,7 @@ pub fn initialize() -> Result<(), Box<dyn std::error::Error>> {
 }
 pub async fn nodes() -> Json<Value> {
     Json(
-        json!({"nodes":REMOTES.get().map(|r|r.keys().cloned().collect::<Vec<_>>()).unwrap_or_default(),"authority":"Optional controllers. Each owns one NATS process and its config-based users."}),
+        json!({"nodes":REMOTES.get().map(|r|r.keys().cloned().collect::<Vec<_>>()).unwrap_or_default(),"authority":"Optional deployment authorities for a NATS process or a JWT account."}),
     )
 }
 async fn request(id: &str, path: &str, body: Option<Value>) -> Result<Value, Error> {

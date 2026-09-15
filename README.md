@@ -114,7 +114,7 @@ The hosted [browser demo](https://axmouth.github.io/natsui/demo/) models workloa
 
 ## Status
 
-**Local operator beta.** Stream and consumer inspection, node monitoring, retained-record browsing and investigation history are implemented. Settings includes opt-in, reviewed JetStream configuration edits. Optional single-operator login is implemented. Individual accounts, roles, public HTTP deployment and server configuration control remain outside the current access model.
+**Operations beta.** Native inspection, retained-record browsing, selectable backlog windows, saved investigations, route topology and optional desktop notifications are implemented. Named users, profile membership and HTTPS proxy deployment support shared access. Optional [OIDC sign-in](docs/OIDC.md), [process control](docs/MANAGED.md) and [JWT user authority](docs/JWT_AUTHORITY.md) require explicit deployment configuration. Public HTTP is unsupported.
 
 The integration suite has passed on Windows and Linux with NATS Server 2.11.8, including TLS, denied operations, reconnects and bounded large inventories. CI also targets macOS. Support claims depend on successful runner results. The first endurance recording was interrupted and is not a completed 24-hour qualification. [Release evidence and remaining gates](RELEASE_CHECKLIST.md)
 

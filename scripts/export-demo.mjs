@@ -4,7 +4,7 @@ import path from 'node:path';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const destination=path.join(root,'dist-demo');
 await mkdir(destination,{recursive:true});
-for(const file of ['fibril.css','style.css','app.js','editing.js','access.js','managed.js','profiles.js','operations.js','buckets.js','workspace.js','trends.js','subjects.js','demo.js','kitten.svg'])await copyFile(path.join(root,'web',file),path.join(destination,file));
+for(const file of ['fibril.css','style.css','app.js','editing.js','access.js','managed.js','profiles.js','operations.js','buckets.js','workspace-extras.js','workspace.js','trends.js','subjects.js','demo.js','kitten.svg'])await copyFile(path.join(root,'web',file),path.join(destination,file));
 let html=await readFile(path.join(root,'web/index.html'),'utf8');
 html=html.replaceAll('href="/','href="./').replaceAll('src="/','src="./').replace('<script src="./demo.js"','<script src="./runtime.js" defer></script><script src="./demo.js"');
 html=html.replace('<head>', `<head><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">`);

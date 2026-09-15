@@ -80,10 +80,25 @@
  async function api(path,options){const e=elapsed(),s=model(e);if(Math.floor(e)!==lastSecond){samples.push({at:s.observed_at,status:s.status,summary:summary(s,settings.backlog_threshold)});samples=samples.slice(-240);lastSecond=Math.floor(e);}
   if(path==='/api/snapshot')return {snapshot:s,monitoring:s.monitoring,summary:summary(s,settings.backlog_threshold),settings:{...settings}};
   if(path==='/api/history')return samples;
+  if(path.startsWith('/api/history/backlog?')){
+   const q=new URL(path,'http://demo.local').searchParams,from=Number(q.get('from')),to=Number(q.get('to'));
+   if(!Number.isSafeInteger(from)||!Number.isSafeInteger(to)||from<0||from>=to||to-from>21600)throw new Error('Choose a time window of at most six hours');
+   let segment=0,previous=null;
+   const rows=samples.filter(row=>row.at>=from&&row.at<=to).map(row=>{
+    const valid=row.status==='complete'&&row.summary.largest?.pending!=null;
+    if(previous&&(!previous.valid||!valid||row.at-previous.at>15))segment++;
+    previous={at:row.at,valid};return {at:row.at,status:row.status,summary:{largest:row.summary.largest},segment,interval_seconds:5};
+   });
+   return {from,to,samples:rows,total:rows.length,aggregated:false,truncated:false};
+  }
   if(path.startsWith('/api/history/window?')){const q=new URL(path,'http://demo.local').searchParams,from=Number(q.get('from')),to=Number(q.get('to')),rows=samples.filter(s=>s.at>=from&&s.at<=to);return {from,to,samples:rows.slice(-240),total:rows.length,truncated:rows.length>240};}
   if(path==='/api/activity')return events;
   if(path.split('?')[0]==='/api/incidents'){const q=new URL(path,'http://demo.local').searchParams,from=Number(q.get('from')||0),to=Number(q.get('to')||Infinity),result=[];for(let i=1;i<samples.length;i++){const a=samples[i-1].summary.largest,b=samples[i].summary.largest;if(a&&b&&a.name===b.name&&(a.pending>settings.backlog_threshold)!==(b.pending>settings.backlog_threshold)){const at=samples[i].at;if(at>=from&&at<=to)result.push({at,kind:b.pending>settings.backlog_threshold?'backlog-high':'backlog-recovered',source:'simulation',resource:'consumer',stream:b.stream,name:b.name,detail:`Synthetic observation: pending delivery ${a.pending} to ${b.pending}; threshold ${settings.backlog_threshold}`});}}return result.reverse();}
   if(path==='/api/settings'){if(options){const next=JSON.parse(options.body);if(!Number.isInteger(next.backlog_threshold)||next.backlog_threshold<1||next.backlog_threshold>1e9||next.refresh_seconds<2||next.refresh_seconds>300||next.retention_days<1||next.retention_days>90)throw new Error('Settings outside supported bounds');settings=next;record('Demo settings changed for this browser session. No server settings were edited.');}return {...settings};}
+  if(path.startsWith('/api/monitoring/routes')){
+   const nodes=monitoring(e,s.observed_at).nodes;
+   return {kind:'routes',at:s.observed_at,nodes:nodes.map(n=>({slot:n.slot,name:n.server_name,server_id:n.server_id,status:'complete',total:2,rows:nodes.filter(peer=>peer.server_id!==n.server_id).map((peer,index)=>({rid:index+1,remote_id:peer.server_id,remote_name:peer.server_name,did_solicit:true,is_configured:true,in_msgs:Math.floor(e*100),out_msgs:Math.floor(e*110),pending_size:0,rtt:'200us'}))}))};
+  }
   if(path.startsWith('/api/monitoring/')){const url=new URL(path,'http://demo.local');return inventory(e,s.observed_at,url.pathname.split('/').at(-1),Number(url.searchParams.get('page')||0));}
   if(path.startsWith('/api/nodes/')){const match=/^\/api\/nodes\/(\d+)\/connections$/.exec(path),slot=match?Number(match[1]):-1;if(slot<0||slot>2)throw new Error('Node is not in the simulated inventory.');const rows=clients(e,slot);return {demo:true,at:s.observed_at,total:rows.length,connections:rows};}
   if(path.startsWith('/api/records/')){const url=new URL(path,'http://demo.local'),name=decodeURIComponent(url.pathname.split('/').at(-1)),stream=s.streams.find(v=>v.config.name===name);if(!stream)throw new Error('Stream is not in the simulated inventory.');const subject=url.searchParams.get('subject')||'>',start=Math.max(stream.state.first_seq,Number(url.searchParams.get('start')||stream.state.first_seq));if(!NatsuiSubjects.valid(subject)||!Number.isSafeInteger(start)||start<1)throw new Error('Invalid subject filter or sequence.');const records=[];if(NatsuiSubjects.matches(subject,stream.config.subjects[0]))for(let seq=start;seq<=stream.state.last_seq&&records.length<20;seq++)records.push({seq:String(seq),subject:stream.config.subjects[0],bytes:11});const next=records.length&&Number(records.at(-1).seq)<stream.state.last_seq?String(Number(records.at(-1).seq)+1):null;return {demo:true,stream:name,observed_at:s.observed_at,state:stream.state,records,next_seq:next,exhausted:!next};}

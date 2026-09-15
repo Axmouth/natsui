@@ -24,6 +24,7 @@ const COOKIE: &str = "natsui_session";
 pub struct Auth(Option<Arc<Protected>>);
 struct Protected {
     key: [u8; 32],
+    policy: RwLock<Option<HashMap<String, Vec<String>>>>,
     sessions: Mutex<HashMap<[u8; 32], Grant>>,
     tickets: Mutex<HashMap<[u8; 32], Grant>>,
     users: Mutex<Option<Connection>>,
@@ -33,6 +34,7 @@ struct Protected {
 }
 #[derive(Clone)]
 struct Identity {
+    identity_revision: u64,
     key: [u8; 32],
     revision: u64,
     role: Role,
@@ -95,6 +97,59 @@ impl Auth {
     pub fn disabled() -> Self {
         Self(None)
     }
+    pub fn configure_policy(&self, bytes: &[u8]) -> Result<(), String> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Policy {
+            profiles: HashMap<String, Vec<String>>,
+        }
+        let protected = self
+            .0
+            .as_ref()
+            .ok_or("Profile policy requires dashboard authentication")?;
+        let policy: Policy =
+            serde_json::from_slice(bytes).map_err(|_| "Invalid profile access policy")?;
+        let valid = |name: &str| {
+            !name.is_empty()
+                && name.len() <= 48
+                && name
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'_')
+        };
+        if bytes.len() > 65536
+            || policy.profiles.len() > 8
+            || policy.profiles.iter().any(|(id, users)| {
+                !valid(id) || users.len() > 256 || users.iter().any(|user| !valid(user))
+            })
+        {
+            return Err("Invalid profile access policy limits".into());
+        }
+        *protected
+            .policy
+            .write()
+            .map_err(|_| "Profile policy lock unavailable")? = Some(policy.profiles);
+        Ok(())
+    }
+    pub fn allowed_profile(&self, headers: &HeaderMap, id: &str) -> bool {
+        if !self.enabled() {
+            return true;
+        }
+        let Some((actor, _)) = self.principal(headers) else {
+            return false;
+        };
+        if actor == "bootstrap" {
+            return true;
+        }
+        let Some(protected) = &self.0 else {
+            return false;
+        };
+        let Ok(policy) = protected.policy.read() else {
+            return false;
+        };
+        policy
+            .as_ref()
+            .is_none_or(|profiles| profiles.get(id).is_some_and(|users| users.contains(&actor)))
+    }
     pub fn enabled(&self) -> bool {
         self.0.is_some()
     }
@@ -124,6 +179,7 @@ impl Auth {
         }
         Ok(Self(Some(Arc::new(Protected {
             key: digest(value),
+            policy: RwLock::new(None),
             sessions: Mutex::new(HashMap::new()),
             tickets: Mutex::new(HashMap::new()),
             users: Mutex::new(None),
@@ -140,10 +196,14 @@ impl Auth {
         db.busy_timeout(Duration::from_secs(2))?;
         db.execute_batch("PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS dashboard_users (id TEXT PRIMARY KEY, role TEXT NOT NULL CHECK(role IN ('viewer','operator','admin')), key_digest BLOB UNIQUE NOT NULL, enabled INTEGER NOT NULL, revision INTEGER NOT NULL);")?;
         db.execute_batch("CREATE TABLE IF NOT EXISTS dashboard_revision (id INTEGER PRIMARY KEY CHECK(id=1), value INTEGER NOT NULL); INSERT OR IGNORE INTO dashboard_revision SELECT 1, COALESCE(MAX(revision),0) FROM dashboard_users;")?;
+        let has_identity: bool=db.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('dashboard_users') WHERE name='identity_revision')",[],|row|row.get(0))?;
+        if !has_identity {
+            db.execute_batch("BEGIN; ALTER TABLE dashboard_users ADD COLUMN identity_revision INTEGER NOT NULL DEFAULT 0; UPDATE dashboard_users SET identity_revision=revision; COMMIT;")?;
+        }
         let mut identities = HashMap::new();
         {
             let mut query = db.prepare(
-                "SELECT id,role,key_digest,enabled,revision FROM dashboard_users LIMIT 257",
+                "SELECT id,role,key_digest,enabled,revision,identity_revision FROM dashboard_users LIMIT 257",
             )?;
             let rows = query.query_map([], |row| {
                 Ok((
@@ -152,13 +212,15 @@ impl Auth {
                     row.get::<_, Vec<u8>>(2)?,
                     row.get::<_, bool>(3)?,
                     row.get::<_, u64>(4)?,
+                    row.get::<_, u64>(5)?,
                 ))
             })?;
             for row in rows {
-                let (id, role, key, enabled, revision) = row?;
+                let (id, role, key, enabled, revision, identity_revision) = row?;
                 identities.insert(
                     id,
                     Identity {
+                        identity_revision,
                         key: key.try_into().map_err(|_| "Invalid dashboard key digest")?,
                         role: Role::parse(&role).ok_or("Invalid stored dashboard role")?,
                         enabled,
@@ -250,6 +312,32 @@ impl Auth {
             })
             .ok_or(StatusCode::UNAUTHORIZED)
     }
+    pub(crate) fn external_session(
+        &self,
+        user: &str,
+        identity_revision: u64,
+        headers: &HeaderMap,
+    ) -> Result<String, StatusCode> {
+        let protected = self.0.as_ref().ok_or(StatusCode::FORBIDDEN)?;
+        let identity = protected
+            .identities
+            .read()
+            .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?
+            .get(user)
+            .filter(|identity| identity.enabled && identity.identity_revision == identity_revision)
+            .cloned()
+            .ok_or(StatusCode::FORBIDDEN)?;
+        let token = self.new_session(
+            Grant {
+                key: identity.key,
+                id: user.to_owned(),
+                revision: identity.revision,
+                expires: Instant::now(),
+            },
+            session(headers),
+        )?;
+        Ok(app_cookie(self, &token, SESSION_SECONDS))
+    }
     fn issue(&self, key: &str, old: Option<&str>) -> Result<String, StatusCode> {
         let identity = self.authenticate(key)?;
         self.new_session(identity, old)
@@ -340,16 +428,20 @@ impl Auth {
             && bool::from(identity.key.ct_eq(&grant.key)))
         .then_some(identity.role)
     }
-    pub fn role(&self, headers: &HeaderMap) -> Option<Role> {
+    fn principal(&self, headers: &HeaderMap) -> Option<(String, Role)> {
         let Some(protected) = &self.0 else {
-            return Some(Role::Admin);
+            return Some(("trusted-local".into(), Role::Admin));
         };
         let token = session(headers)?;
         let sessions = protected.sessions.lock().ok()?;
-        let identity = sessions
+        let grant = sessions
             .get(&digest(token))
             .filter(|g| g.expires > Instant::now())?;
-        self.identity_role(identity)
+        self.identity_role(grant)
+            .map(|role| (grant.id.clone(), role))
+    }
+    pub fn role(&self, headers: &HeaderMap) -> Option<Role> {
+        self.principal(headers).map(|(_, role)| role)
     }
     pub fn review_owner(&self, headers: &HeaderMap) -> String {
         if !self.enabled() {
@@ -365,19 +457,8 @@ impl Auth {
             .unwrap_or_default()
     }
     pub fn actor(&self, headers: &HeaderMap) -> String {
-        let Some(protected) = &self.0 else {
-            return "trusted-local".into();
-        };
-        let Some(token) = session(headers) else {
-            return "unavailable".into();
-        };
-        protected
-            .sessions
-            .lock()
-            .ok()
-            .and_then(|sessions| sessions.get(&digest(token)).cloned())
-            .filter(|grant| grant.expires > Instant::now() && self.identity_role(grant).is_some())
-            .map(|grant| grant.id)
+        self.principal(headers)
+            .map(|(id, _)| id)
             .unwrap_or_else(|| "unavailable".into())
     }
     fn revoke(&self, token: Option<&str>) -> Result<(), StatusCode> {
@@ -433,6 +514,10 @@ pub async fn guard(State(auth): State<Auth>, request: Request, next: Next) -> Re
             | "/style.css"
             | "/fibril.css"
             | "/kitten.svg"
+            | "/oidc-complete.js"
+            | "/api/auth/oidc"
+            | "/api/auth/oidc/start"
+            | "/api/auth/oidc/callback"
             | "/api/auth/login"
             | "/api/auth/ticket"
             | "/api/auth/exchange"
@@ -1005,7 +1090,7 @@ impl Auth {
             .identities
             .read()
             .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
-        let mut rows: Vec<_> = identities.iter().map(|(id, identity)| serde_json::json!({"id":id,"role":identity.role,"enabled":identity.enabled,"revision":identity.revision})).collect();
+        let mut rows: Vec<_> = identities.iter().map(|(id, identity)| serde_json::json!({"id":id,"role":identity.role,"enabled":identity.enabled,"revision":identity.revision,"identity_revision":identity.identity_revision})).collect();
         rows.sort_by(|a, b| a["id"].as_str().cmp(&b["id"].as_str()));
         Ok(
             serde_json::json!({"users":rows,"bootstrap":"The configured dashboard key retains recovery administrator access."}),
@@ -1039,7 +1124,7 @@ impl Auth {
         }
         let revision = next_user_revision(&tx)?;
         let key = random_key().map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
-        tx.execute("INSERT INTO dashboard_users(id,role,key_digest,enabled,revision) VALUES(?1,?2,?3,1,?4)", params![user.id,user.role.name(),digest(&key).as_slice(),revision]).map_err(|_| StatusCode::CONFLICT)?;
+        tx.execute("INSERT INTO dashboard_users(id,role,key_digest,enabled,revision,identity_revision) VALUES(?1,?2,?3,1,?4,?4)", params![user.id,user.role.name(),digest(&key).as_slice(),revision]).map_err(|_| StatusCode::CONFLICT)?;
         tx.commit().map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
         protected
             .identities
@@ -1048,13 +1133,16 @@ impl Auth {
             .insert(
                 user.id.clone(),
                 Identity {
+                    identity_revision: revision,
                     key: digest(&key),
                     role: user.role,
                     enabled: true,
                     revision,
                 },
             );
-        Ok(serde_json::json!({"id":user.id,"role":user.role,"key":key,"revision":revision}))
+        Ok(
+            serde_json::json!({"id":user.id,"role":user.role,"key":key,"revision":revision,"identity_revision":revision}),
+        )
     }
     fn change_user(&self, id: &str, change: UserChange) -> Result<serde_json::Value, StatusCode> {
         let protected = self.0.as_ref().ok_or(StatusCode::NOT_FOUND)?;
