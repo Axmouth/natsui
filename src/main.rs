@@ -592,7 +592,7 @@ async fn monitor_inventory(
     Path(kind): Path<String>,
     Query(query): Query<InventoryQuery>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
-    if query.page > 10000 || !["connections", "subscriptions"].contains(&kind.as_str()) {
+    if query.page > 10000 || !["connections", "subscriptions", "routes"].contains(&kind.as_str()) {
         return Err((StatusCode::BAD_REQUEST, "Invalid inventory query".into()));
     }
     app.monitor

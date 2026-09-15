@@ -86,3 +86,5 @@ Evidence remains in data/soak/2026-09-14-shared-deployment.jsonl and its summary
 Remaining limits are deliberate: notifications need an open browser, OIDC does not synchronize groups or provider logout, JWT resolver acceptance does not prove cluster-wide convergence, and managed process changes do not coordinate a cluster rollout. The accepted partial endurance evidence is unchanged.
 
 Final local release checks also passed the Windows archive, release-build OIDC/workspace browser suites and the existing authenticated three-node cluster browser workflow. The latter waits for asynchronously populated profile options after navigation.
+
+Live dashboard verification also confirmed a six-hour window spanning 4,272 stored observations and a three-node route graph. The HTTP handler allowlist is covered by both a direct route response check and the authenticated cluster browser regression.

@@ -93,6 +93,12 @@ try {
   await page.reload();
   await page.waitForFunction(() => document.querySelector('.profile-select')?.value === 'default');
   assert.equal(await page.locator('.profile-select').inputValue(), 'default');
+  const topology = await request('/api/monitoring/routes', undefined, 'default', 'GET');
+  assert.equal(topology.nodes.length, 3);
+  assert.ok(topology.nodes.every(node => node.status === 'complete' && node.rows.length > 0 && node.server_id));
+  await page.goto(base + '/#replicas');
+  await page.waitForFunction(() => document.querySelectorAll('.route-node').length === 3);
+  assert.equal(await page.locator('.route-edge').count(), 3);
   const initial = await request('/api/settings', undefined, 'default', 'GET');
   const staging = await request('/api/settings', undefined, 'staging', 'GET');
   await request(
