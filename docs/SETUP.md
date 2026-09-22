@@ -398,3 +398,8 @@ docker run --rm --user 0 --entrypoint tar -v natsui-restored-data:/data --mount 
 Start a replacement dashboard with -v natsui-restored-data:/data, the same NATS identity/profile, and the original image version or a documented compatible upgrade. Use a different container name and loopback port for a restore drill. Check /readyz, sign in, and inspect settings and history before replacing the original instance. Newer database schemas may not open in older binaries. Keep a stopped-process backup before upgrades. Pin image versions or digests when repeatable restores matter.
 
 For Compose deployments, inspect the dashboard's /data mount with docker inspect before choosing a volume name. Docker compose down preserves named volumes. `docker compose down -v` removes non-external volumes. The authenticated example uses named auth and history volumes. Both can be removed by down -v, so backups must cover their separate recovery requirements. Native backups follow the same stop/copy-complete-directory/restart procedure.
+
+
+## Optional NATS login
+
+[NATS-backed login](NATS_LOGIN.md) accepts existing NATS usernames and passwords. Live requests use the signed-in user credentials. Collector history and HTTP monitoring require separate deployment opt-ins. Dashboard administration retains its own identity boundary.

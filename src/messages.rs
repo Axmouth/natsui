@@ -38,6 +38,9 @@ async fn inventory(app: &App, stream: &str) -> Result<Value, Failure> {
     if !telemetry::valid_token(stream) {
         return Err(bad("Choose a valid stream"));
     }
+    if !app.demo {
+        return Ok(Value::Null);
+    }
     app.current
         .read()
         .await

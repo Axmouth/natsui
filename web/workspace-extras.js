@@ -430,6 +430,7 @@
           signal: controller.signal,
           cache: 'no-store',
         });
+        if (response.status === 403) return;
         if (response.status === 401) {
           location.replace('/login');
           return;

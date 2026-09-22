@@ -41,6 +41,7 @@ struct Profile {
 struct Registry {
     auth: auth::Auth,
     routes: Arc<BTreeMap<String, (String, Router)>>,
+    apps: Arc<BTreeMap<String, App>>,
 }
 fn valid_id(id: &str) -> bool {
     !id.is_empty()
@@ -57,6 +58,8 @@ fn selected(headers: &HeaderMap) -> String {
         .to_owned()
 }
 pub async fn router(base: App, directory: &str) -> Result<Router, Box<dyn std::error::Error>> {
+    let mut contexts = BTreeMap::new();
+    contexts.insert("default".to_owned(), base.clone());
     let mut apps = BTreeMap::new();
     apps.insert(
         "default".into(),
@@ -132,14 +135,33 @@ pub async fn router(base: App, directory: &str) -> Result<Router, Box<dyn std::e
             tokio::spawn(app.monitor.clone().collect());
             tokio::spawn(crate::collect(app.clone()));
             tokio::spawn(crate::incidents::collect(app.clone()));
+            contexts.insert(profile.id.clone(), app.clone());
             apps.insert(profile.id, (profile.name, crate::application_routes(app)));
+        }
+    }
+    if base.auth.nats_policy().enabled {
+        for app in contexts.values() {
+            if app.demo {
+                return Err("NATS login cannot be used with the simulated demo".into());
+            }
+            app.connection
+                .as_ref()
+                .ok_or("NATS login requires a connection profile")?
+                .for_user("validation", "validation")?;
         }
     }
     let registry = Registry {
         auth: base.auth.clone(),
         routes: Arc::new(apps),
+        apps: Arc::new(contexts),
     };
     Ok(Router::new()
+        .route(
+            "/api/auth/nats",
+            get(login_options)
+                .post(nats_login)
+                .layer(axum::extract::DefaultBodyLimit::max(4096)),
+        )
         .route("/api/profiles", get(list))
         .route(
             "/api/profiles/select",
@@ -156,9 +178,29 @@ pub async fn router(base: App, directory: &str) -> Result<Router, Box<dyn std::e
         ))
         .with_state(registry))
 }
+async fn login_options(State(registry): State<Registry>) -> Json<Value> {
+    let policy = registry.auth.nats_policy();
+    Json(
+        json!({"enabled":policy.enabled,"shared_history":policy.history,"shared_monitoring":policy.monitoring,
+        "profiles":if policy.enabled { registry.routes.iter().map(|(id,(name,_))| json!({"id":id,"name":name})).collect::<Vec<_>>() } else { vec![] }}),
+    )
+}
+async fn nats_login(
+    State(registry): State<Registry>,
+    headers: HeaderMap,
+    Json(credentials): Json<crate::nats_login::Credentials>,
+) -> Response {
+    if !registry.auth.nats_policy().enabled {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let Some(app) = registry.apps.get(&credentials.profile) else {
+        return StatusCode::BAD_REQUEST.into_response();
+    };
+    crate::nats_login::login(app, &headers, credentials).await
+}
 async fn list(State(registry): State<Registry>, headers: HeaderMap) -> Json<Value> {
     Json(
-        json!({"selected":selected(&headers),"profiles":registry.routes.iter().filter(|(id,_)|registry.auth.allowed_profile(&headers,id)).map(|(id,(name,_))|json!({"id":id,"name":name})).collect::<Vec<_>>() }),
+        json!({"selected":registry.auth.nats_session(&headers).map(|s|s.profile.clone()).unwrap_or_else(||selected(&headers)),"profiles":registry.routes.iter().filter(|(id,_)|registry.auth.allowed_profile(&headers,id)).map(|(id,(name,_))|json!({"id":id,"name":name})).collect::<Vec<_>>() }),
     )
 }
 #[derive(Deserialize)]
@@ -209,6 +251,17 @@ async fn dispatch(State(registry): State<Registry>, request: Request) -> Respons
         )
             .into_response();
     }
+    if scoped
+        && let Some(session) = request
+            .extensions()
+            .get::<Arc<crate::nats_login::Session>>()
+            .cloned()
+    {
+        let Some(app) = registry.apps.get(&id) else {
+            return StatusCode::NOT_FOUND.into_response();
+        };
+        return crate::nats_login::dispatch(app.clone(), session, request).await;
+    }
     match route.clone().oneshot(request).await {
         Ok(response) => response,
         Err(never) => match never {},
@@ -219,6 +272,103 @@ async fn dispatch(State(registry): State<Registry>, request: Request) -> Respons
 mod tests {
     use super::*;
     use axum::body::Body;
+    #[tokio::test]
+    async fn concurrent_session_replacement_never_reaches_collector() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use tokio::sync::Notify;
+        let auth = auth::Auth::with_nats_policy(crate::nats_login::Policy {
+            enabled: true,
+            ..Default::default()
+        });
+        let identity = || crate::nats_login::Session {
+            profile: "default".into(),
+            username: "reader".into(),
+            connection: connection::Config {
+                url: "nats://127.0.0.1:1".into(),
+                credentials: None,
+                ca: None,
+                certificate: None,
+                key: None,
+                tls: false,
+            },
+        };
+        let cookie = auth.nats_cookie(identity(), &HeaderMap::new()).unwrap();
+        let cookie = cookie.split(';').next().unwrap().to_owned();
+        let hits = Arc::new(AtomicUsize::new(0));
+        let counter = hits.clone();
+        let collector = Router::new().fallback(move || {
+            let counter = counter.clone();
+            async move {
+                counter.fetch_add(1, Ordering::SeqCst);
+                "collector data"
+            }
+        });
+        let registry = Registry {
+            auth: auth.clone(),
+            routes: Arc::new(BTreeMap::from([(
+                "default".into(),
+                ("Default".into(), collector),
+            )])),
+            apps: Arc::new(BTreeMap::new()),
+        };
+        let entered = Arc::new(Notify::new());
+        let release = Arc::new(Notify::new());
+        let notify_entered = entered.clone();
+        let notify_release = release.clone();
+        let router = Router::new()
+            .fallback(dispatch)
+            .with_state(registry)
+            .layer(axum::middleware::from_fn(
+                move |request: Request, next: axum::middleware::Next| {
+                    let entered = notify_entered.clone();
+                    let release = notify_release.clone();
+                    async move {
+                        assert!(
+                            request
+                                .extensions()
+                                .get::<Arc<crate::nats_login::Session>>()
+                                .is_some()
+                        );
+                        entered.notify_one();
+                        release.notified().await;
+                        next.run(request).await
+                    }
+                },
+            ))
+            .layer(axum::middleware::from_fn_with_state(
+                auth.clone(),
+                auth::guard,
+            ));
+        let request = || {
+            Request::builder()
+                .uri("/api/snapshot")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap()
+        };
+        let in_flight = tokio::spawn(router.clone().oneshot(request()));
+        tokio::time::timeout(std::time::Duration::from_secs(3), entered.notified())
+            .await
+            .unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert("cookie", cookie.parse().unwrap());
+        auth.nats_cookie(identity(), &headers).unwrap();
+        release.notify_one();
+        let response = tokio::time::timeout(std::time::Duration::from_secs(3), in_flight)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(hits.load(Ordering::SeqCst), 0);
+        let response =
+            tokio::time::timeout(std::time::Duration::from_secs(3), router.oneshot(request()))
+                .await
+                .unwrap()
+                .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(hits.load(Ordering::SeqCst), 0);
+    }
     #[tokio::test]
     async fn profiles_route_to_explicit_context_and_reject_unknown_selection() {
         let routes = BTreeMap::from([
@@ -240,6 +390,7 @@ mod tests {
         let registry = Registry {
             auth: auth::Auth::disabled(),
             routes: Arc::new(routes),
+            apps: Arc::new(BTreeMap::new()),
         };
         for (profile, expected) in [
             ("stage", "second"),

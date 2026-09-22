@@ -31,3 +31,16 @@ scripts/soak.mjs defaults to 24 hours against a loopback dashboard. NATSUI_SOAK_
 NATSUI_SOAK_CONTAINER optionally records Docker container CPU and approximate memory alongside readiness, collection, storage and request latency. This host-side recorder requires Docker CLI access. The dashboard container itself does not need Docker socket access.
 
 The JSONL record and adjacent summary must be inspected together. Sleep, restarts and large sampling gaps can invalidate a sustained-duration claim even when the wall-clock deadline passes. A partial or interrupted recording must retain its actual duration and failure count.
+
+
+## NATS-backed login, 2026-09-22
+
+Local Windows verification used Rust 1.94.0, NATS Server 2.11.8 and disposable TLS certificates. All 54 Rust tests passed with ignored integration tests enabled. Formatting and Clippy with warnings denied passed.
+
+The real-broker login regression covers invalid passwords, literal password punctuation and Unicode, separate NATS accounts, stream lists with denied consumer requests, message reads without list permission, denied message reads and deletion, permitted creation, session-owned previews, denied Core publishing observed independently, history redaction, logout and password changes on the next request. TLS coverage rejects unauthenticated servers, untrusted certificates and inherited collector client certificates, and verifies that collector credential files are not used for login connections.
+
+The deterministic session-replacement test pauses an authenticated request, removes its session, then verifies denial and zero collector-route invocations. Unit tests cover closed-by-default routes and independent history/monitoring sharing.
+
+scripts/smoke-nats-login.mjs passed with headless Microsoft Edge on desktop and mobile viewports. It checks the real login form, rejected and accepted credentials, disabled shared-data labels, restricted admin APIs, logout and browser errors. Screenshots are written to data/browser-check/nats-login.png and nats-login-mobile.png. The test is included in Linux browser CI alongside the existing identity and workspace regressions.
+
+Existing OIDC signed-token, mapping, profile and revocation checks passed. SSE capacity and disconnect cleanup passed. UI route, trend, synthetic demo, JavaScript syntax and Pages link checks passed, including the generated NATS login guide. The running demo was not restarted or reconfigured. This record describes local verification, not a completed remote CI or publication run.

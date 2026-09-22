@@ -294,3 +294,17 @@ Verification passed for production assets backed by the local NATS cluster and t
 | JWT administration | Optional pinned NSC adapter with mounted authority | User issuance can take effect immediately. Revocations are local until distributed. Resolver acceptance is distinct from all-broker convergence. |
 
 Deployment recipes are published from OIDC.md, JWT_AUTHORITY.md, PROFILES.md and SHARED_ACCESS.md. The static demo reuses the same browser assets. Authentication, controllers and live transport remain backend capabilities.
+
+
+## NATS-backed login, 2026-09-22
+
+| Aspect | Form | Reason and limits |
+| --- | --- | --- |
+| Existing NATS users | Optional username/password login, new to natsui | Live requests authenticate with the session credentials and NATS enforces its API permissions. No local copy of NATS permissions or resource ownership is inferred. |
+| Collector history and monitoring | Separate opt-ins for NATS sessions | These data sources do not perform the user's NATS authorization checks. Sharing exposes profile-wide collector observations, potentially across accounts. Embedded node history is removed when monitoring sharing is disabled. |
+| Dashboard administration | Separate dashboard login retained | NATS credentials confer no authority over dashboard users, profiles, settings or deployment controllers. |
+| Long-lived credentials | Memory-only sessions with fresh request authentication | Logout, expiry and restart release session credentials. Fresh connections add connection traffic and avoid stale reconnect identities. NATS JWT, NKey and client-certificate login remain deferred. |
+| Partial inventory | Preserve streams when consumer requests exhaust the time budget | Restricted users can retain permitted stream observations without implying empty consumer inventories. |
+| Core publishing | Sent with acceptance unconfirmed | A protocol flush cannot establish success when NATS reports authorization errors asynchronously. |
+
+Verification: 54 Rust tests, strict Clippy, real NATS permission isolation and TLS, concurrent session replacement, desktop/mobile login, existing OIDC/SSE, demo and Pages checks passed locally. Details and limitations are recorded in docs/VERIFICATION.md.

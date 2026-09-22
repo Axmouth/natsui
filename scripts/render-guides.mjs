@@ -9,6 +9,7 @@ const pages = [
   ['PROFILES.md', 'profiles.html', 'Connection profiles'],
   ['MANAGED.md', 'managed.html', 'Managed NATS'],
   ['OIDC.md', 'oidc.html', 'SSO sign-in'],
+  ['NATS_LOGIN.md', 'nats-login.html', 'NATS sign-in'],
   ['JWT_AUTHORITY.md', 'jwt-authority.html', 'JWT account authority'],
 ];
 const escape = (text) =>

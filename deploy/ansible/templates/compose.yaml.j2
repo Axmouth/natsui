@@ -12,6 +12,9 @@ services:
       NATSUI_MONITOR_URLS: {{ (natsui_monitor_urls | join(',')) | replace('$', '$$') | to_json }}
       NATSUI_AUTH_TOKEN_FILE: /run/natsui-auth/access.key
       NATSUI_ALLOW_WRITES: '0'
+      NATSUI_NATS_LOGIN: {{ (natsui_nats_login | default(false) | bool) | ternary('1', '0') | to_json }}
+      NATSUI_NATS_LOGIN_SHARED_HISTORY: {{ (natsui_nats_login_shared_history | default(false) | bool) | ternary('1', '0') | to_json }}
+      NATSUI_NATS_LOGIN_SHARED_MONITORING: {{ (natsui_nats_login_shared_monitoring | default(false) | bool) | ternary('1', '0') | to_json }}
 {% if natsui_creds_source | length > 0 %}
       NATSUI_CREDS: /run/nats/observer.creds
 {% endif %}

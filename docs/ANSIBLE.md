@@ -148,3 +148,8 @@ For NATSUI_PUBLIC_URL deployments, the unauthenticated API check must send the c
 The [OIDC guide](OIDC.md) and [profile policy guide](PROFILES.md) use deployment-owned JSON files. Provision the JSON and client secret with Vault-backed copy tasks, mode '0400', owner '10001', group '10001' and no_log: true. Add read-only mounts and NATSUI_OIDC_CONFIG_FILE or NATSUI_ACCESS_POLICY_FILE to the Compose template. Notify the existing recreation handler when either changes. The bootstrap key remains available for unattended recovery.
 
 The [JWT authority](JWT_AUTHORITY.md) requires its own service, exclusive persistent NSC store, signing keys and independent TLS/token files. The observer playbook does not provision or infer this signing authority. Its store backup and key distribution require explicit deployment tasks.
+
+
+## NATS-backed login
+
+Setting natsui_nats_login to true enables existing NATS username/password login. The mounted dashboard key remains available for dashboard administration. natsui_nats_login_shared_history and natsui_nats_login_shared_monitoring default to false. These options share collector data with every authenticated NATS user on the selected profile, including users from other NATS accounts. Client-certificate profiles are not supported by this password-login mode. The [NATS login guide](NATS_LOGIN.md) describes the credential and sharing boundaries.

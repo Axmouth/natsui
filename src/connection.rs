@@ -180,7 +180,48 @@ impl Config {
             .connection_timeout(Duration::from_secs(3)))
     }
 
+    pub fn for_user(&self, username: &str, password: &str) -> Result<Self, String> {
+        // Certificate mapping could authenticate as the collector instead of the supplied user.
+        if self.certificate.is_some() || self.key.is_some() {
+            return Err("NATS password login does not support client-certificate profiles".into());
+        }
+        let mut urls = self.urls()?;
+        let username =
+            percent_encoding::utf8_percent_encode(username, percent_encoding::NON_ALPHANUMERIC)
+                .to_string();
+        let password =
+            percent_encoding::utf8_percent_encode(password, percent_encoding::NON_ALPHANUMERIC)
+                .to_string();
+        for url in &mut urls {
+            url.set_username(&username)
+                .map_err(|_| "Invalid username")?;
+            url.set_password(Some(&password))
+                .map_err(|_| "Invalid password")?;
+        }
+        Ok(Self {
+            url: urls
+                .iter()
+                .map(|url| url.as_str())
+                .collect::<Vec<_>>()
+                .join(","),
+            credentials: None,
+            ca: self.ca.clone(),
+            certificate: None,
+            key: None,
+            tls: self.tls,
+        })
+    }
+    pub async fn connect_user(&self) -> Result<async_nats::Client, String> {
+        let client = self.connect_inner(true).await?;
+        if !client.server_info().auth_required {
+            return Err("NATS login requires a server with authentication enabled".into());
+        }
+        Ok(client)
+    }
     pub async fn connect(&self) -> Result<async_nats::Client, String> {
+        self.connect_inner(false).await
+    }
+    async fn connect_inner(&self, user_request: bool) -> Result<async_nats::Client, String> {
         self.validate()?;
         let mut servers = self.urls()?;
         for url in &mut servers {
@@ -202,6 +243,8 @@ impl Config {
                 // for later reconnects, even when the server advertises no peers.
                 attempts.push(async move {
                     let options = self.options().await?.retain_servers_order();
+                    // Each HTTP request authenticates afresh. Reconnects cannot change authority mid-request.
+                    let options = if user_request { options.max_reconnects(0) } else { options };
                     options.connect(candidates).await.map_err(|error| format!(
                         "NATS connection failed ({:?}). Check the addresses, credentials and TLS trust. Connection secrets are omitted.",
                         error.kind()

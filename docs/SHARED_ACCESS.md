@@ -53,3 +53,8 @@ natsui.example.com {
 The DNS name must resolve to that host and the proxy must obtain a trusted certificate. A proxy running in a container instead connects to dashboard:4321 on a dedicated private Docker network. In that arrangement the dashboard does not need a published port. Only the proxy's HTTPS endpoint should be externally reachable. The proxy must preserve the original Host header. TLS termination does not authorize access by itself.
 
 The dashboard's direct HTTP listener is an internal hop. NATSUI_PUBLIC_URL does not enable TLS on that listener. Loopback health checks and the authenticated login-ticket CLI endpoint remain available for local administration. Other dashboard HTTP requests require the configured public Host and browser sessions use Secure cookies.
+
+
+## Optional NATS login
+
+[NATS-backed login](NATS_LOGIN.md) accepts existing NATS usernames and passwords. Live requests use the signed-in user credentials. Collector history and HTTP monitoring require separate deployment opt-ins. Dashboard administration retains its own identity boundary.

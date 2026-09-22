@@ -51,3 +51,8 @@ Mount the file read-only and set NATSUI_ACCESS_POLICY_FILE to its container path
 Admin can manage global users and controllers, including rotating another user's key. Profile membership therefore does not isolate mutually untrusted administrators. Separate dashboard deployments and signing authorities are appropriate for that boundary. Usernames in this policy are deployment-owned membership labels, so recreating a username preserves its membership. OIDC additionally pins the identity revision to prevent a stale provider mapping attaching to that replacement.
 
 Policy changes require container recreation. Existing browser tabs then reconnect and recheck access. A forbidden selected profile leaves the profile selector available for choosing an allowed one.
+
+
+## Optional NATS login
+
+[NATS-backed login](NATS_LOGIN.md) accepts existing NATS usernames and passwords. Live requests use the signed-in user credentials. Collector history and HTTP monitoring require separate deployment opt-ins. Dashboard administration retains its own identity boundary.

@@ -366,7 +366,7 @@ pub async fn apply(
         })?;
     let result = if p.action == "publish" {
         if p.mode == "core" {
-            tokio::time::timeout(Duration::from_secs(5),async {client.publish(p.subject.clone(),p.payload.clone().into()).await.map_err(upstream)?;client.flush().await.map_err(upstream)?;Ok::<Value,Error>(json!({"mode":"core","accepted_by_server":true,"storage_verified":false,"processing_verified":false}))}).await.map_err(upstream).and_then(|r|r)
+            tokio::time::timeout(Duration::from_secs(5),async {client.publish(p.subject.clone(),p.payload.clone().into()).await.map_err(upstream)?;client.flush().await.map_err(upstream)?;Ok::<Value,Error>(json!({"mode":"core","accepted_by_server":null,"outcome":"unconfirmed","storage_verified":false,"processing_verified":false}))}).await.map_err(upstream).and_then(|r|r)
         } else {
             let mut headers = async_nats::HeaderMap::new();
             headers.insert("Nats-Expected-Stream", p.stream.as_str());

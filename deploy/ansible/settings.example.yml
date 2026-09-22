@@ -21,3 +21,8 @@ natsui_creds_source: ''
 natsui_ca_source: ''
 natsui_client_cert_source: ''
 natsui_client_key_source: ''
+
+# Shared data is profile-wide and does not inherit individual NATS permissions.
+natsui_nats_login: false
+natsui_nats_login_shared_history: false
+natsui_nats_login_shared_monitoring: false

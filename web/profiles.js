@@ -9,6 +9,11 @@
   host.prepend(select);
   api('/api/profiles')
     .then((result) => {
+      if (result.profiles.length === 1 && result.selected !== activeProfile && !result.profiles.some(profile => profile.id === activeProfile)) {
+        sessionStorage.setItem('natsui-profile', result.selected);
+        location.reload();
+        return;
+      }
       for (const profile of result.profiles) {
         const option = element('option', profile.name);
         option.value = profile.id;

@@ -94,6 +94,7 @@ async fn list(
 }
 
 pub async fn observe(client: &async_nats::Client, prefix: &str, scope: &str) -> Snapshot {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(18);
     let (streams, truncated) = match list(client, format!("{prefix}.STREAM.LIST"), "streams", 300)
         .await
     {
@@ -122,14 +123,23 @@ pub async fn observe(client: &async_nats::Client, prefix: &str, scope: &str) -> 
             issues.push("Consumer inventory capped at 2,000.".into());
             break;
         }
-        match list(
-            client,
-            format!("{prefix}.CONSUMER.LIST.{name}"),
-            "consumers",
-            remaining,
+        let result = tokio::time::timeout_at(
+            deadline,
+            list(
+                client,
+                format!("{prefix}.CONSUMER.LIST.{name}"),
+                "consumers",
+                remaining,
+            ),
         )
-        .await
-        {
+        .await;
+        let Ok(result) = result else {
+            issues.push(
+                "Consumer collection reached its time budget. Stream inventory is retained.".into(),
+            );
+            break;
+        };
+        match result {
             Ok((mut values, truncated)) => {
                 for value in &mut values {
                     value["stream_name"] = json!(name);

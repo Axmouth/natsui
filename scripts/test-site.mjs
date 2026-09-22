@@ -4,7 +4,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import './build-site.mjs';
 const root=path.resolve(fileURLToPath(new URL('../dist-site/',import.meta.url)));
-for(const name of ['index.html','setup.html','ansible.html','shared-access.html','monitoring-security.html','profiles.html','managed.html','demo/index.html']){
+for(const name of ['index.html','setup.html','ansible.html','shared-access.html','nats-login.html','monitoring-security.html','profiles.html','managed.html','demo/index.html']){
  const file=path.join(root,name),html=await readFile(file,'utf8');
  for(const [,url] of html.matchAll(/(?:src|href)="([^"]+)"/g)){
   if(/^https?:/.test(url))continue;

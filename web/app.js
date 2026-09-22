@@ -97,8 +97,8 @@ function inspectChart(host, svg, samples, x, y, shape, range){
 function renderChart(){
  const host=$('history-chart'),history=backlog.samples,range=backlog.range;
  const coverage=history.length?`Observed ${new Date(history[0].at*1000).toLocaleTimeString()} to ${new Date(history.at(-1).at*1000).toLocaleTimeString()} / ${number(history.length)} samples.`:'No recorded samples in this window.';
- $('backlog-status').textContent=backlog.error?'History storage is unavailable.':backlog.loading?'Updating window...':coverage+(backlog.aggregated?` Summarized from ${number(backlog.total)} samples across this window. Each time bucket retains its first, last, minimum and maximum observations.`:'')+(backlog.truncated?` Showing the latest 240 of ${number(backlog.total)} samples. Narrow the window for full coverage.`:'');
- if(backlog.error||!history.length||!range){host.replaceChildren(element('div',backlog.error?'History storage is unavailable.':backlog.loading?'Loading history...':'No recorded samples in this window.','empty'));host.onpointermove=host.onpointerdown=host.onpointerleave=host.onfocus=host.onblur=host.onkeydown=null;host.removeAttribute('tabindex');host.removeAttribute('aria-describedby');return;}
+ $('backlog-status').textContent=backlog.error?backlog.error:backlog.loading?'Updating window...':coverage+(backlog.aggregated?` Summarized from ${number(backlog.total)} samples across this window. Each time bucket retains its first, last, minimum and maximum observations.`:'')+(backlog.truncated?` Showing the latest 240 of ${number(backlog.total)} samples. Narrow the window for full coverage.`:'');
+ if(backlog.error||!history.length||!range){host.replaceChildren(element('div',backlog.error?backlog.error:backlog.loading?'Loading history...':'No recorded samples in this window.','empty'));host.onpointermove=host.onpointerdown=host.onpointerleave=host.onfocus=host.onblur=host.onkeydown=null;host.removeAttribute('tabindex');host.removeAttribute('aria-describedby');return;}
  const valid=history.filter(h=>h.status==='complete' && h.summary.largest?.pending!=null);
  if(!valid.length){host.replaceChildren(element('div','No complete backlog values in this window.','empty'));host.onpointermove=host.onpointerdown=host.onpointerleave=host.onfocus=host.onblur=host.onkeydown=null;host.removeAttribute('tabindex');host.removeAttribute('aria-describedby');return;}
  const NS='http://www.w3.org/2000/svg';const svg=document.createElementNS(NS,'svg');svg.setAttribute('viewBox','0 0 600 180');svg.setAttribute('role','img');svg.setAttribute('aria-label','Largest consumer backlog across collected samples');
@@ -136,6 +136,7 @@ function render(){
  $('largest').textContent=summary.largest?number(summary.largest.pending):s.status==='unavailable'?'--':'0';$('largest-name').textContent=summary.largest?`${summary.largest.name} / ${summary.largest.stream}`:'No observed consumer';
  $('behind').textContent=number(summary.behind);$('threshold-label').textContent=`More than ${number(data.settings.backlog_threshold)} pending deliveries`;$('streams-count').textContent=number(summary.streams);$('consumer-count').textContent=`${number(summary.consumers)} observed consumers`;$('storage').textContent=bytes(summary.stored_bytes);$('nav-streams').textContent=number(summary.streams);$('nav-consumers').textContent=number(summary.consumers);
  const issueNodes=s.issues.map(text=>element('div',text,'issue'));if(s.status==='partial')issueNodes.unshift(element('div','Partial coverage: counts below describe observed resources, not the entire account.','issue'));$('collection-issues').replaceChildren(...issueNodes);
+ if(data.dashboard?.login_method==='nats'){issueNodes.push(element('div',`Live data uses the signed-in NATS user. Shared collector history: ${data.dashboard.shared_history?'enabled':'disabled'}. Shared monitoring: ${data.dashboard.shared_monitoring?'enabled':'disabled'}.`,'panel-note'));$('collection-issues').replaceChildren(...issueNodes);}
  $('freshness').textContent=`Observed ${new Date(s.observed_at*1000).toLocaleTimeString()} / ${s.status}`;
  renderResources();if(globalThis.renderWorkspace)renderWorkspace();renderAttention();renderChart();consumerTable('overview-table',sortedConsumers().slice(0,5));renderStreams();
  const query=$('consumer-search').value.toLowerCase();consumerTable('consumers-table',sortedConsumers().filter(c=>`${c.name} ${c.stream_name}`.toLowerCase().includes(query)&&(!$('behind-only').checked||c.num_pending>data.settings.backlog_threshold)));
@@ -149,7 +150,7 @@ async function refresh(){
  if(results[0].status==='rejected')throw results[0].reason;
  if(globalThis.acceptIncidents)acceptIncidents(results[3]);
  data=results[0].value;lastOk=Date.now();history=results[1].status==='fulfilled'?results[1].value:[];render();
- if(results[2].status==='fulfilled'){$('activity-list').replaceChildren(...results[2].value.map(event=>{const row=element('div',null,'activity-row');row.append(element('time',new Date(event.at*1000).toLocaleString()),badge(event.kind),element('p',event.detail));return row;}));if(!results[2].value.length)empty('activity-list','No recorded activity for this workspace.');}else empty('activity-list','Activity storage is unavailable.');
+ if(results[2].status==='fulfilled'){$('activity-list').replaceChildren(...results[2].value.map(event=>{const row=element('div',null,'activity-row');row.append(element('time',new Date(event.at*1000).toLocaleString()),badge(event.kind),element('p',event.detail));return row;}));if(!results[2].value.length)empty('activity-list','No recorded activity for this workspace.');}else empty('activity-list',results[2].reason?.message || 'Activity storage is unavailable.');
  }catch(error){renderMonitorCoverage(data?.monitoring,true);$('collection-issues').replaceChildren(element('div',`Dashboard unavailable. ${lastOk?'Previously shown values are stale. ':''}${error.message}`,'issue'));$('mode').textContent='Disconnected';$('mode').className='badge warn';$('freshness').textContent=lastOk?`Last dashboard response ${new Date(lastOk).toLocaleTimeString()}`:'No dashboard response';}
  finally{busy=false;$('refresh').disabled=false;clearTimeout(timer);if(refreshPending){refreshPending=false;queueMicrotask(refresh);}else timer=setTimeout(refresh,globalThis.natsuiStreamLive?30000:3000);}
 }
@@ -249,7 +250,8 @@ function renderMonitorCoverage(monitor, disconnected=false){
  const host=$('monitor-coverage'),nodes=monitor?.nodes||[];
  const reporting=nodes.filter(n=>n.status==='complete'&&Date.now()/1000-n.at<=15).length;
  let state='neutral',label='Monitoring not configured',detail='Set NATSUI_MONITOR_URLS to enable node monitoring.';
- if(disconnected){state='unavailable';label='Monitoring unavailable';detail='The dashboard could not refresh monitoring data.';}
+ if(monitor?.status==='restricted'){state='neutral';label='Monitoring not shared';detail=monitor.detail;}
+ else if(disconnected){state='unavailable';label='Monitoring unavailable';detail='The dashboard could not refresh monitoring data.';}
  else if(monitor?.demo){state='neutral';label=`${nodes.length}/${nodes.length} simulated nodes`;detail='Synthetic process and client metrics follow the demo workload. No NATS processes or containers are measured.';}
  else if(monitor?.status!=='not_configured'){
   if(nodes.length){state=reporting===nodes.length?'complete':reporting?'partial':'unavailable';label=`${reporting}/${nodes.length} reporting`;detail=`${reporting} of ${nodes.length} configured monitoring endpoints have successful observations within 15 seconds.`;}

@@ -24,6 +24,7 @@ const COOKIE: &str = "natsui_session";
 pub struct Auth(Option<Arc<Protected>>);
 struct Protected {
     key: [u8; 32],
+    nats_login: crate::nats_login::Policy,
     policy: RwLock<Option<HashMap<String, Vec<String>>>>,
     sessions: Mutex<HashMap<[u8; 32], Grant>>,
     tickets: Mutex<HashMap<[u8; 32], Grant>>,
@@ -42,6 +43,7 @@ struct Identity {
 }
 #[derive(Clone)]
 struct Grant {
+    nats: Option<Arc<crate::nats_login::Session>>,
     key: [u8; 32],
     expires: Instant,
     id: String,
@@ -53,6 +55,8 @@ pub enum Role {
     Viewer,
     Operator,
     Admin,
+    #[serde(skip_deserializing)]
+    Nats,
 }
 impl Role {
     fn name(self) -> &'static str {
@@ -60,6 +64,7 @@ impl Role {
             Self::Viewer => "viewer",
             Self::Operator => "operator",
             Self::Admin => "admin",
+            Self::Nats => "nats",
         }
     }
     fn parse(value: &str) -> Option<Self> {
@@ -94,6 +99,12 @@ pub fn initialize(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 impl Auth {
+    #[cfg(test)]
+    pub fn with_nats_policy(policy: crate::nats_login::Policy) -> Self {
+        let mut auth = Self::from_key(&random_key().unwrap()).unwrap();
+        Arc::get_mut(auth.0.as_mut().unwrap()).unwrap().nats_login = policy;
+        auth
+    }
     pub fn disabled() -> Self {
         Self(None)
     }
@@ -131,6 +142,9 @@ impl Auth {
         Ok(())
     }
     pub fn allowed_profile(&self, headers: &HeaderMap, id: &str) -> bool {
+        if let Some(session) = self.nats_session(headers) {
+            return session.profile == id;
+        }
         if !self.enabled() {
             return true;
         }
@@ -154,11 +168,80 @@ impl Auth {
         self.0.is_some()
     }
     pub fn from_env() -> Result<Self, String> {
-        match std::env::var("NATSUI_AUTH_TOKEN_FILE") {
-            Err(std::env::VarError::NotPresent) => Ok(Self::disabled()),
-            Err(_) => Err("NATSUI_AUTH_TOKEN_FILE must be a valid path".into()),
-            Ok(path) => Self::from_file(Path::new(&path)),
+        let policy = crate::nats_login::Policy::from_env()?;
+        let mut auth = match std::env::var("NATSUI_AUTH_TOKEN_FILE") {
+            Err(std::env::VarError::NotPresent) if policy.enabled => {
+                Self::from_key(&random_key()?)?
+            }
+            Err(std::env::VarError::NotPresent) => Self::disabled(),
+            Err(_) => return Err("NATSUI_AUTH_TOKEN_FILE must be a valid path".into()),
+            Ok(path) => Self::from_file(Path::new(&path))?,
+        };
+        if let Some(protected) = auth.0.as_mut().and_then(Arc::get_mut) {
+            protected.nats_login = policy;
         }
+        Ok(auth)
+    }
+    pub fn nats_policy(&self) -> crate::nats_login::Policy {
+        self.0.as_ref().map(|p| p.nats_login).unwrap_or_default()
+    }
+    pub async fn expire_sessions(self) {
+        let Some(protected) = &self.0 else {
+            return;
+        };
+        let mut interval = tokio::time::interval(Duration::from_secs(60));
+        loop {
+            interval.tick().await;
+            if let Ok(mut sessions) = protected.sessions.lock() {
+                sessions.retain(|_, grant| grant.expires > Instant::now());
+            }
+            if let Ok(mut tickets) = protected.tickets.lock() {
+                tickets.retain(|_, grant| grant.expires > Instant::now());
+            }
+        }
+    }
+    pub fn nats_session(&self, headers: &HeaderMap) -> Option<Arc<crate::nats_login::Session>> {
+        let protected = self.0.as_ref()?;
+        let token = session(headers)?;
+        let mut sessions = protected.sessions.lock().ok()?;
+        sessions.retain(|_, grant| grant.expires > Instant::now());
+        sessions.get(&digest(token))?.nats.clone()
+    }
+    pub fn nats_cookie(
+        &self,
+        identity: crate::nats_login::Session,
+        headers: &HeaderMap,
+    ) -> Result<String, StatusCode> {
+        if !self.nats_policy().enabled {
+            return Err(StatusCode::NOT_FOUND);
+        }
+        let token = self.new_session(
+            Grant {
+                id: format!("nats:{}:{}", identity.profile, identity.username),
+                nats: Some(Arc::new(identity)),
+                key: [0; 32],
+                revision: 0,
+                expires: Instant::now(),
+            },
+            session(headers),
+        )?;
+        Ok(app_cookie(self, &token, SESSION_SECONDS))
+    }
+    pub fn login_attempt(&self) -> Result<(), StatusCode> {
+        let protected = self.0.as_ref().ok_or(StatusCode::NOT_FOUND)?;
+        let now = Instant::now();
+        let mut attempts = protected
+            .attempts
+            .lock()
+            .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
+        if now.duration_since(attempts.0) >= Duration::from_secs(60) {
+            *attempts = (now, 0);
+        }
+        if attempts.1 >= 30 {
+            return Err(StatusCode::TOO_MANY_REQUESTS);
+        }
+        attempts.1 += 1;
+        Ok(())
     }
     pub fn from_file(path: &Path) -> Result<Self, String> {
         let mut value = String::new();
@@ -179,6 +262,7 @@ impl Auth {
         }
         Ok(Self(Some(Arc::new(Protected {
             key: digest(value),
+            nats_login: crate::nats_login::Policy::default(),
             policy: RwLock::new(None),
             sessions: Mutex::new(HashMap::new()),
             tickets: Mutex::new(HashMap::new()),
@@ -291,6 +375,7 @@ impl Auth {
         let hashed = digest(key);
         if bool::from(protected.key.ct_eq(&hashed)) {
             return Ok(Grant {
+                nats: None,
                 expires: now,
                 id: "bootstrap".into(),
                 key: hashed,
@@ -305,6 +390,7 @@ impl Auth {
             .iter()
             .find(|(_, identity)| identity.enabled && bool::from(identity.key.ct_eq(&hashed)))
             .map(|(id, identity)| Grant {
+                nats: None,
                 expires: now,
                 id: id.clone(),
                 key: hashed,
@@ -329,6 +415,7 @@ impl Auth {
             .ok_or(StatusCode::FORBIDDEN)?;
         let token = self.new_session(
             Grant {
+                nats: None,
                 key: identity.key,
                 id: user.to_owned(),
                 revision: identity.revision,
@@ -417,6 +504,9 @@ impl Auth {
             .is_some_and(|identity| self.identity_role(identity).is_some())
     }
     fn identity_role(&self, grant: &Grant) -> Option<Role> {
+        if grant.nats.is_some() {
+            return self.nats_policy().enabled.then_some(Role::Nats);
+        }
         let protected = self.0.as_ref()?;
         if grant.id == "bootstrap" {
             return bool::from(protected.key.ct_eq(&grant.key)).then_some(Role::Admin);
@@ -492,7 +582,7 @@ fn app_cookie(auth: &Auth, token: &str, age: u64) -> String {
     }
     value
 }
-pub async fn guard(State(auth): State<Auth>, request: Request, next: Next) -> Response {
+pub async fn guard(State(auth): State<Auth>, mut request: Request, next: Next) -> Response {
     if !auth.enabled() {
         return next.run(request).await;
     }
@@ -518,6 +608,7 @@ pub async fn guard(State(auth): State<Auth>, request: Request, next: Next) -> Re
             | "/api/auth/oidc"
             | "/api/auth/oidc/start"
             | "/api/auth/oidc/callback"
+            | "/api/auth/nats"
             | "/api/auth/login"
             | "/api/auth/ticket"
             | "/api/auth/exchange"
@@ -537,6 +628,15 @@ pub async fn guard(State(auth): State<Auth>, request: Request, next: Next) -> Re
         };
     }
     if !public {
+        if role == Some(Role::Nats)
+            && !crate::nats_login::allowed(request.method(), path, auth.nats_policy())
+        {
+            return (
+                StatusCode::FORBIDDEN,
+                "This endpoint is not shared with NATS login sessions.",
+            )
+                .into_response();
+        }
         let admin = path.starts_with("/api/users")
             || (path.starts_with("/api/profiles")
                 && request.method() != Method::GET
@@ -553,6 +653,13 @@ pub async fn guard(State(auth): State<Auth>, request: Request, next: Next) -> Re
         {
             return StatusCode::FORBIDDEN.into_response();
         }
+    }
+    if role == Some(Role::Nats) {
+        let Some(session) = auth.nats_session(request.headers()) else {
+            return StatusCode::UNAUTHORIZED.into_response();
+        };
+        // Carry the authenticated context through dispatch even if the cookie is revoked concurrently.
+        request.extensions_mut().insert(session);
     }
     next.run(request).await
 }
@@ -1199,7 +1306,9 @@ fn next_user_revision(tx: &rusqlite::Transaction<'_>) -> Result<u64, StatusCode>
     tx.query_row("UPDATE dashboard_revision SET value=value+1 WHERE id=1 AND value<9007199254740991 RETURNING value", [], |row| row.get(0)).map_err(|_| StatusCode::SERVICE_UNAVAILABLE)
 }
 pub async fn me(State(app): State<crate::App>, headers: HeaderMap) -> Json<serde_json::Value> {
-    Json(serde_json::json!({"enabled":app.auth.enabled(),"role":app.auth.role(&headers)}))
+    Json(
+        serde_json::json!({"enabled":app.auth.enabled(),"role":app.auth.role(&headers),"method":if app.auth.nats_session(&headers).is_some(){"nats"}else{"dashboard"}}),
+    )
 }
 pub async fn users(State(app): State<crate::App>) -> Result<Json<serde_json::Value>, StatusCode> {
     app.auth.users().map(Json)

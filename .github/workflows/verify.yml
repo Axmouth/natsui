@@ -52,6 +52,7 @@ jobs:
           npx playwright install --with-deps chromium
           NATSUI_OIDC_BROWSER=1 node scripts/smoke-oidc.mjs target/release/natsui
           NATSUI_WORKSPACE_BROWSER=1 node scripts/smoke-workspace.mjs target/release/natsui
+          node scripts/smoke-nats-login.mjs target/release/natsui
       - uses: actions/upload-artifact@v4
         with:
           name: natsui-${{ runner.os }}-${{ runner.arch }}

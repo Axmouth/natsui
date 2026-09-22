@@ -8,6 +8,9 @@ mod incidents;
 mod managed;
 mod messages;
 mod monitoring;
+mod nats_login;
+#[cfg(test)]
+mod nats_login_tests;
 mod oidc;
 mod operations;
 mod profiles;
@@ -113,6 +116,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         auth.configure_origin(&origin)?;
     }
     oidc::initialize(&auth)?;
+    tokio::spawn(auth.clone().expire_sessions());
     let settings_cache = Arc::new(RwLock::new(db.settings().await?));
     let connection = if demo {
         None
@@ -144,7 +148,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!(
         "Dashboard authentication: {}",
         if auth.enabled() {
-            "access-key login required"
+            if auth.nats_policy().enabled {
+                "NATS login enabled"
+            } else {
+                "dashboard login required"
+            }
         } else {
             "disabled, trusted local access"
         }

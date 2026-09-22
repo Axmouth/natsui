@@ -108,7 +108,7 @@
             number(result.sequence) +
             '. Application processing is not tracked.'
           : result.mode === 'core'
-            ? 'Sent over Core NATS. Storage and application processing are unverified.'
+            ? 'Core publish sent. Acceptance is unconfirmed, including permission checks. Storage and processing are not verified.'
             : result.verified
               ? 'Operation applied and verified for ' + result.resource + '.'
               : 'Request accepted. Current resource state could not be verified.';

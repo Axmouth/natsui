@@ -28,3 +28,17 @@ Frontend state still relies on shared browser globals and DOM event handlers. A 
 The optional controller adds a separate Python component and deployment authority. Its scope should remain narrow. JWT provisioning, clustered rollout, arbitrary configuration editing and unrelated process control require distinct designs. No generic shell or Docker socket is part of this adapter.
 
 The existing Activity store is an operational record, not a tamper-proof compliance log. Access roles are global across profiles. Large-scale deployment and long-duration performance claims require separate evidence.
+
+
+## NATS login review, 2026-09-22
+
+An independent read-only reviewer inspected the implementation and a corrective pass. Four findings were resolved:
+
+- A session-removal race could select the collector context. Authentication now carries the NATS session in request extensions and missing sessions fail closed. A barrier-based regression replaces the session while a request is paused and verifies that the collector route is never invoked.
+- URL conversion could reinterpret password punctuation. Credentials are encoded before insertion and decoded once. The real-broker tests exercise literal commas, percent escapes and Unicode.
+- Slow or denied consumer inventory requests could discard permitted streams. Consumer collection now has its own deadline and retains a partial snapshot.
+- A Core protocol flush was treated as server acceptance. Core publishing now reports an unconfirmed outcome, including authorization, while JetStream storage acknowledgments remain distinct.
+
+The follow-up review found no additional blocking credential-isolation or shared-data issue. New NATS-session endpoints require an explicit route classification. This is a dashboard data-source boundary, not a parallel NATS permission model.
+
+Fresh connections simplify credential revocation but add authentication and connection traffic. The implementation reconstructs the route service with a request-specific App, reusing handlers without threading credentials through each endpoint. These tradeoffs are acceptable at the documented session limits. Pooling would require explicit identity binding, permission-change handling and isolation tests before replacing this approach.
