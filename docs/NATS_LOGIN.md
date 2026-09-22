@@ -4,6 +4,8 @@ NATS-backed login is an optional username/password sign-in method. NATS validate
 
 NATS permissions remain authoritative. Stream listing returns whatever the NATS API permits, without inferred ownership or application-subject filtering. Failed live requests never retry with collector credentials. Unavailable data is not an empty inventory.
 
+For a new deployment, start with the [step-by-step setup guide](SETUP.md). It downloads the NATS login Compose file, configures the collector, starts the dashboard and signs in with an existing NATS user. The following settings apply when adding this option to an existing deployment.
+
 ## Enable the login option
 
 Add these environment settings to the dashboard service in an existing Compose deployment:
@@ -45,6 +47,20 @@ Both sharing options default to 0:
 Sharing is profile-wide. Every user that NATS accepts on that profile receives the enabled shared data, including users from another NATS account. It does not inherit the signed-in user's subject permissions. These options suit a trusted operations team and remain disabled for individually restricted deployments.
 
 Historical node observations are removed unless monitoring sharing is also enabled. Live data always uses the session credentials, regardless of either setting. Shared responses require fresh NATS authentication too, so they are unavailable during a broker authentication or connectivity failure.
+
+## Troubleshooting
+
+| Symptom | Check or next step |
+| --- | --- |
+| The sign-in page only offers a dashboard key | NATSUI_NATS_LOGIN=1 must reach the dashboard container, not just exist in an unused .env entry. The main Compose recipe passes it explicitly. Recreate the service after changing startup configuration. |
+| NATS login fails | Check the original username/password, reachable client addresses and TLS trust. The server must require authentication. Collector readiness does not prove that this user's login works. |
+| Login succeeds but streams or consumers are unavailable | Check this user's JetStream API publish grants, reply-inbox subscriptions, account and domain. Permission denials can appear as timeouts. The permissions example below lists read-only requests. |
+| Streams work but a message cannot be inspected | Message-get permission is separate from inventory permission. The record may also have expired or been deleted. Only an explicit no-record reply establishes absence. |
+| Live data works but historical graphs are not shared | NATSUI_NATS_LOGIN_SHARED_HISTORY defaults to 0. Enable it only when sharing all collector history for that profile is intended, then recreate the service. |
+| Nodes or connections are not shared | NATSUI_NATS_LOGIN_SHARED_MONITORING defaults to 0. When enabled, HTTP monitoring URLs, ports, TLS and credentials must also be configured independently. |
+| A permitted operation is disabled | The profile also needs NATSUI_ALLOW_WRITES=1. If NATS rejects an enabled operation, check the signed-in user's API permissions. |
+| Dashboard settings or user management are unavailable | These require a separate dashboard administrator login. A NATS administrator username does not grant dashboard authority. |
+| Startup rejects a client-certificate profile | Password login cannot inherit the collector's client certificate. Use the dashboard-key or SSO path for mutual-TLS profiles. |
 
 ## Permissions
 

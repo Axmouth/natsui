@@ -1,6 +1,85 @@
-# Dashboard setup, authentication and persistent storage
+# Set up Natsui and sign in with NATS
 
-The dashboard runs beside an existing NATS server. SQLite is embedded. No database service is required. The [hosted setup guide](https://axmouth.github.io/natsui/setup.html) includes the same startup path. The disposable cluster demo remains unauthenticated on host loopback. This guide configures a separate authenticated dashboard.
+The main setup path uses an existing NATS username and password. Live reads and operations run through that user's credentials. NATS enforces access. The dashboard runs beside the cluster, with embedded SQLite in a persistent volume and a separate collector identity for background observations.
+
+This path requires NATS username/password authentication, with optional server TLS. Existing deployments can keep their current Compose files and follow [enable NATS login](NATS_LOGIN.md#enable-the-login-option). NATS JWT/NKey-only or mutual-TLS deployments use the [dashboard-key alternative](#docker-with-an-existing-broker) or [SSO](OIDC.md). The [local cluster demo](#connect-a-docker-cluster-step-by-step) remains a separate keyless tryout.
+
+## 1. Find the existing cluster
+
+Docker Desktop must use Linux containers. Docker Engine requires the Compose plugin. Compose 2.34+ supports these commands. Commands work in PowerShell, Bash and Zsh unless labeled otherwise.
+
+```sh
+docker ps --format "table {{.Names}}\t{{.Ports}}"
+docker inspect nats1 --format '{{json .NetworkSettings.Networks}}'
+```
+
+Replace nats1 with an actual broker container name. The network object key, for example myapp_default, becomes NATS_NETWORK. On that network, use the broker service names and their internal client ports, such as nats1:4222. Host mappings such as 14222:4222 do not change that internal address. NATS route ports are not client ports.
+
+The cluster administrator supplies a collector identity with [observation permissions](../deploy/permissions.conf), plus an existing NATS user for browser sign-in. These can be different users. NATS authentication must already be enabled. This recipe starts only the dashboard and does not create or modify broker users.
+
+## 2. Download the Compose file and configure collection
+
+Create a folder named natsui-deployment and download [compose.nats-login.yaml](../deploy/compose.nats-login.yaml) into it. Save a file named .env, not .env.txt, beside it:
+
+```dotenv
+NATS_NETWORK=myapp_default
+NATSUI_URL='nats://OBSERVER:URL_ENCODED_PASSWORD@nats1:4222,nats://nats2:4222,nats://nats3:4222'
+NATSUI_PROFILE=cluster-observer-v2
+NATSUI_MONITOR_URLS=http://nats1:8222,http://nats2:8222,http://nats3:8222
+NATSUI_NATS_LOGIN_SHARED_HISTORY=0
+NATSUI_NATS_LOGIN_SHARED_MONITORING=0
+NATSUI_ALLOW_WRITES=0
+```
+
+Replace the example network, server addresses and observer credentials. Percent-encode reserved characters in URL credentials, such as @ as %40 and % as %25. The browser login form accepts the original password without URL encoding. Credentials in .env become container environment values and are visible to Docker administrators. Keep this file outside source control.
+
+NATSUI_URL supplies the fixed cluster addresses and collector login. The supplied Compose file enables NATSUI_NATS_LOGIN=1. Browser sign-in replaces the collector credentials for live requests. Monitoring uses separate HTTP ports and credentials, and is never inferred from NATS discovery. Leave NATSUI_MONITOR_URLS empty when monitoring is not configured.
+
+The named natsui-data volume stores SQLite history and settings. The recipe mounts the complete /data directory and requires no dashboard access-key file or authentication volume. Only one dashboard process may write to that volume. Stop an earlier dashboard on port 4321 before starting this recipe.
+
+## 3. Configure TLS when required, then start
+
+For NATS on a trusted private Docker network without TLS:
+
+```sh
+docker compose --env-file .env -f compose.nats-login.yaml up -d --wait
+```
+
+For private-CA server TLS, download [compose.tls.yaml](../deploy/compose.tls.yaml), place the trusted CA bundle at local-secrets/ca.pem, and change every NATSUI_URL scheme to tls://. The mounted file must be readable by container UID/GID 10001. The [mounted-file permissions](#mounted-file-permissions) section covers Linux and Docker Desktop. Then start with:
+
+```sh
+docker compose --env-file .env -f compose.nats-login.yaml -f compose.tls.yaml up -d --wait
+```
+
+With publicly trusted certificates, tls:// can use standard trust without the private-CA overlay. Certificate names must match the configured broker addresses. Credentials crossing an untrusted network require TLS. Client-certificate authentication needs the dashboard-key or SSO branch, because NATS password login does not inherit a collector client certificate.
+
+Keep the same Compose file list for later logs, updates and shutdown. Readiness checks the collector, so its credentials and JetStream permissions must work even before browser sign-in.
+
+## 4. Sign in and check live data
+
+Open http://127.0.0.1:4321, select the configured cluster, and enter an existing NATS username and password. No separate dashboard key is needed for this flow.
+
+Streams, consumers, retained messages and enabled operations use the signed-in user's NATS credentials. A successful login does not grant JetStream API permissions. [Permission examples and troubleshooting](NATS_LOGIN.md#troubleshooting) explain unavailable panels without treating them as empty data.
+
+Historical graphs and node/connection monitoring are initially not shared with NATS sessions. A trusted operations-team deployment can enable either sharing flag in .env, then recreate the dashboard with the same file list:
+
+```sh
+docker compose --env-file .env -f compose.nats-login.yaml up -d --wait --force-recreate
+```
+
+Include -f compose.tls.yaml when it was used at startup. Sharing exposes the collector's profile-wide observations to every accepted NATS user, potentially across NATS accounts. It does not follow each user's subject permissions. Live requests always retain the user's credentials. NATSUI_ALLOW_WRITES=1 enables reviewed operations, which still require NATS permission.
+
+The dashboard is now ready for local use. [HTTPS deployment](SHARED_ACCESS.md) covers shared browser access. NATS login does not grant dashboard user management, settings changes or controller authority. The following sections describe optional login branches and deployment references.
+
+## Login choices
+
+| Sign-in method | Identity checked by | Credentials used for live NATS requests | Intended path |
+| --- | --- | --- | --- |
+| NATS username/password | NATS | The signed-in NATS user | Main setup path above |
+| Dashboard access key or one-time link | Natsui | The profile's configured collector identity, limited by the dashboard role | Dashboard administration, JWT/NKey or mutual-TLS broker connections |
+| SSO | OIDC provider plus an explicit dashboard-user mapping | The profile's configured collector identity, limited by the mapped dashboard role | Existing organization identity provider |
+
+NATS login and dashboard login can coexist when a dashboard key is also configured. A NATS username such as natsadmin does not become a dashboard administrator. The [NATS login guide](NATS_LOGIN.md), [dashboard identity guide](SHARED_ACCESS.md) and [SSO guide](OIDC.md) cover the separate boundaries.
 
 ## Extended deployment options
 
@@ -11,6 +90,8 @@ The dashboard runs beside an existing NATS server. SQLite is embedded. No databa
 The [Ansible guide](ANSIBLE.md) includes a playbook for Vault-backed dashboard credentials, optional NATS/TLS files, persistent storage, change-triggered recreation, readiness checks and SSH-tunneled access. Deployment is non-interactive once automation credentials are configured.
 
 ## Docker with an existing broker
+
+This is the alternative dashboard-key path. The NATS sign-in recipe above does not require these key-generation steps.
 
 The commands below use Docker Desktop with Linux containers or Docker Engine. NATS_NETWORK and NATS_SERVICE are placeholders for an existing private Docker network and broker service name. The broker must be reachable from that network. A dedicated restricted NATS identity is described in [SECURITY.md](../SECURITY.md).
 
@@ -38,7 +119,7 @@ For a machine without NATS, the local demo starts a real three-node cluster, Nat
 docker compose -f oci://ghcr.io/axmouth/natsui-demo:latest up -d --wait
 ```
 
-Open http://127.0.0.1:4321. This is an unauthenticated local tryout, with no certificates or existing cluster required. The following recipe attaches Natsui to an existing cluster. It does not create servers or change broker authentication. Docker Desktop must use Linux containers. Docker Engine requires the Compose plugin. Compose 2.34+ supports all commands in this guide. Commands run in PowerShell, Bash or Zsh unless labeled otherwise. Stop a previous dashboard using port 4321 before starting this recipe. Only one Natsui process may use the natsui-data volume.
+Open http://127.0.0.1:4321. This is an unauthenticated local tryout, with no certificates or existing cluster required. The following alternative recipe attaches Natsui to an existing cluster using a dashboard access key. It does not create servers or change broker authentication. Docker Desktop must use Linux containers. Docker Engine requires the Compose plugin. Compose 2.34+ supports all commands in this guide. Commands run in PowerShell, Bash or Zsh unless labeled otherwise. Stop a previous dashboard using port 4321 before starting this recipe. Only one Natsui process may use the natsui-data volume.
 
 ### 1. Find the network and listening ports
 
@@ -261,7 +342,7 @@ If it instead requires username/password, retain those credentials in the tls://
 
 ### Native credential and TLS paths
 
-For native Natsui, the variables are identical but point to host files. Follow the native key/data setup below, then replace its NATSUI_URL assignment with these connection settings before launching the executable. PowerShell example for mutual TLS plus JWT:
+For native Natsui, the variables are identical but point to host files. Follow the native dashboard-key branch below, then replace its NATSUI_URL assignment with these connection settings before launching the executable. PowerShell example for mutual TLS plus JWT:
 
 ```powershell
 $env:NATSUI_URL = 'tls://broker.example.internal:4222'
@@ -285,9 +366,16 @@ A native process outside Docker usually cannot resolve Compose service names. Us
 
 ## Verify the connection and troubleshoot
 
-Run docker exec natsui natsui login, or the equivalent Compose exec command, and open the one-time link. Check the cluster connection status and stream inventory, then open Nodes. Three successful monitoring endpoints should show 3/3 reporting. Empty inventory can be valid for a new application account. An unavailable/error status is not an empty cluster. Existing streams should match the selected NATS account and JetStream domain. HTTP readiness alone is not proof of broker access or healthy monitoring.
+For the main path, sign in with the existing NATS user. For the dashboard-key alternative, run docker exec natsui natsui login, or the equivalent Compose exec command, and open the one-time link. Check the cluster connection status and stream inventory. Nodes requires shared monitoring to be enabled for NATS sessions. Three successful, shared monitoring endpoints should show 3/3 reporting. Empty inventory can be valid for a new application account. An unavailable/error status is not an empty cluster. Existing streams should match the selected NATS account and JetStream domain. HTTP readiness alone is not proof of broker access or healthy monitoring.
 
-Use the same Compose file list as the selected start command when inspecting, updating or stopping the deployment. For example, the full mutual TLS/JWT recipe uses:
+Use the same Compose file list as the selected start command when inspecting, updating or stopping the deployment. For example, the main NATS login recipe uses:
+
+```sh
+docker compose --env-file .env -f compose.nats-login.yaml ps
+docker compose --env-file .env -f compose.nats-login.yaml logs --tail 50 dashboard
+```
+
+The alternative full mutual TLS/JWT recipe uses:
 
 ```sh
 docker compose --env-file .env -f compose.network.yaml -f compose.tls.yaml -f compose.mtls.yaml -f compose.creds.yaml ps
@@ -311,11 +399,36 @@ Config-based NATS users use the optional process controller. JWT users use the o
 
 ## Native binary
 
-Generate the key once and use stable data/secret paths. NATS credentials use the same variables as the container.
+The main native path also uses NATS sign-in and a stable data directory. Replace the collector credentials and broker address before starting.
+
+```powershell
+New-Item -ItemType Directory -Force data
+$env:NATSUI_DATA_DIR = "$PWD/data"
+$env:NATSUI_URL = 'nats://OBSERVER:URL_ENCODED_PASSWORD@127.0.0.1:4222'
+$env:NATSUI_PROFILE = 'production-observer'
+$env:NATSUI_NATS_LOGIN = '1'
+.\natsui.exe
+```
+
+```sh
+mkdir -p data
+export NATSUI_DATA_DIR="$PWD/data"
+export NATSUI_URL='nats://OBSERVER:URL_ENCODED_PASSWORD@127.0.0.1:4222'
+export NATSUI_PROFILE=production-observer
+export NATSUI_NATS_LOGIN=1
+./natsui
+```
+
+Open http://127.0.0.1:4321 and sign in with an existing NATS user. The same sharing flags and server-TLS variables apply as in the container recipe.
+
+### Alternative native dashboard key
+
+Set NATSUI_NATS_LOGIN=0 for this branch, particularly when client certificates are required. Generate the key once and use stable data/secret paths. NATS credentials use the same variables as the container.
 
 ```powershell
 New-Item -ItemType Directory -Force local-secrets, data
 .\natsui.exe --init-auth .\local-secrets\dashboard.key
+$env:NATSUI_NATS_LOGIN = '0'
 $env:NATSUI_AUTH_TOKEN_FILE = "$PWD/local-secrets/dashboard.key"
 $env:NATSUI_DATA_DIR = "$PWD/data"
 $env:NATSUI_URL = 'nats://127.0.0.1:4222'
@@ -326,6 +439,7 @@ $env:NATSUI_PROFILE = 'production-observer'
 ```sh
 mkdir -p local-secrets data
 ./natsui --init-auth ./local-secrets/dashboard.key
+export NATSUI_NATS_LOGIN=0
 export NATSUI_AUTH_TOKEN_FILE="$PWD/local-secrets/dashboard.key"
 export NATSUI_DATA_DIR="$PWD/data"
 export NATSUI_URL=nats://127.0.0.1:4222
@@ -339,10 +453,10 @@ Subsequent starts reuse the existing key. The natsui login command opens the sho
 
 Named dashboard users, roles and one-time login links are described in the [shared-access guide](SHARED_ACCESS.md). The configured key is a recovery administrator.
 
-- NATSUI_AUTH_TOKEN_FILE enables dashboard authentication and the bootstrap recovery administrator. An unset variable retains trusted local access. An empty, unreadable or malformed configured file fails startup.
+- NATSUI_AUTH_TOKEN_FILE enables dashboard authentication and the bootstrap recovery administrator. When neither NATS login nor a dashboard key is enabled, trusted local access remains available. An empty, unreadable or malformed configured file fails startup.
 - --init-auth generates 256 random bits encoded as 64 hexadecimal characters. It does not create a human password or a NATS credential. The process retains a SHA-256 digest for comparison, not the raw access key.
 - Sign-in creates an HttpOnly, SameSite=Strict cookie. Sessions expire after eight hours, are revoked by Sign out, and are all invalidated by a process restart. At most 32 sessions are retained. The oldest is evicted when full.
-- Sign-in accepts at most 30 attempts per minute across the instance. Requests have a 1 KiB body limit. Mutation requests still require the same-origin request header and existing Host/Origin checks.
+- Sign-in accepts at most 30 attempts per minute across the instance. Access-key requests have a 1 KiB body limit and NATS login requests have a 4 KiB body limit. Mutation requests still require the same-origin request header and existing Host/Origin checks.
 - All holders of the bootstrap key are recovery administrators. Named viewer/operator/admin identities provide separate keys, session revocation and audit attribution. Optional OIDC maps provider subjects to those identities.
 - Login assets and the minimal health/readiness endpoints are public. Inventory, payload inspection, exports, settings and editing APIs require a valid session when authentication is enabled.
 - Local HTTP uses loopback cookies. NATSUI_PUBLIC_URL configures an explicit HTTPS origin behind a trusted reverse proxy and enables Secure cookies. Public HTTP is unsupported.
@@ -400,6 +514,6 @@ Start a replacement dashboard with -v natsui-restored-data:/data, the same NATS 
 For Compose deployments, inspect the dashboard's /data mount with docker inspect before choosing a volume name. Docker compose down preserves named volumes. `docker compose down -v` removes non-external volumes. The authenticated example uses named auth and history volumes. Both can be removed by down -v, so backups must cover their separate recovery requirements. Native backups follow the same stop/copy-complete-directory/restart procedure.
 
 
-## Optional NATS login
+## NATS login reference
 
-[NATS-backed login](NATS_LOGIN.md) accepts existing NATS usernames and passwords. Live requests use the signed-in user credentials. Collector history and HTTP monitoring require separate deployment opt-ins. Dashboard administration retains its own identity boundary.
+The [NATS login guide](NATS_LOGIN.md) covers permissions, troubleshooting, shared observations and session limits for the main setup path.

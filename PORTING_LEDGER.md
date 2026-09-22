@@ -308,3 +308,12 @@ Deployment recipes are published from OIDC.md, JWT_AUTHORITY.md, PROFILES.md and
 | Core publishing | Sent with acceptance unconfirmed | A protocol flush cannot establish success when NATS reports authorization errors asynchronously. |
 
 Verification: 54 Rust tests, strict Clippy, real NATS permission isolation and TLS, concurrent session replacement, desktop/mobile login, existing OIDC/SSE, demo and Pages checks passed locally. Details and limitations are recorded in docs/VERIFICATION.md.
+
+
+## Setup guide polish, 2026-09-22
+
+NATS username/password sign-in is the main documented setup path for new deployments. A standalone Compose recipe provides persistent SQLite storage, fixed collector credentials and separate shared-data flags that default to disabled. Dashboard-key, SSO, JWT and mutual-TLS recipes remain explicit alternatives. Runtime authentication defaults are unchanged.
+
+The guides add a login comparison, symptom-based NATS sign-in troubleshooting, an in-page contents list and section permalinks. Copy controls use format-neutral feedback and restore their original labels. These are documentation and navigation conveniences, new to natsui rather than ports from Fibril.
+
+Verification: Pages link checks, Compose defaults and TLS-overlay rendering, and desktop/mobile browser checks passed. Runtime deployments were not modified.

@@ -44,3 +44,10 @@ The deterministic session-replacement test pauses an authenticated request, remo
 scripts/smoke-nats-login.mjs passed with headless Microsoft Edge on desktop and mobile viewports. It checks the real login form, rejected and accepted credentials, disabled shared-data labels, restricted admin APIs, logout and browser errors. Screenshots are written to data/browser-check/nats-login.png and nats-login-mobile.png. The test is included in Linux browser CI alongside the existing identity and workspace regressions.
 
 Existing OIDC signed-token, mapping, profile and revocation checks passed. SSE capacity and disconnect cleanup passed. UI route, trend, synthetic demo, JavaScript syntax and Pages link checks passed, including the generated NATS login guide. The running demo was not restarted or reconfigured. This record describes local verification, not a completed remote CI or publication run.
+
+
+## Setup guide polish, 2026-09-22
+
+Generated Pages links, downloaded recipe paths, section anchors and static demo isolation passed. Docker Compose configuration checks verified that compose.nats-login.yaml enables NATS login without a dashboard-key volume, preserves /data storage, defaults both sharing flags and writes to disabled, and combines with the server-TLS overlay.
+
+A disposable headless Edge check verified copy success and selection fallback, format-neutral announcements, restoration of both guide and landing-page button labels, in-page contents links, heading permalinks and a 390-pixel mobile viewport without horizontal page overflow. Desktop and mobile screenshots were inspected. This was documentation and static-site verification. No running deployment was changed.

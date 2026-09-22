@@ -1,0 +1,32 @@
+name: natsui-connected
+services:
+  dashboard:
+    image: ghcr.io/axmouth/natsui:latest
+    ports: ['127.0.0.1:4321:4321']
+    environment:
+      NATSUI_URL: ${NATSUI_URL:?Set NATSUI_URL to the cluster seeds and collector identity}
+      NATSUI_PROFILE: ${NATSUI_PROFILE:-cluster-observer-v1}
+      NATSUI_DOMAIN: ${NATSUI_DOMAIN:-}
+      NATSUI_MONITOR_URLS: ${NATSUI_MONITOR_URLS:-}
+      NATSUI_NATS_LOGIN: '1'
+      NATSUI_NATS_LOGIN_SHARED_HISTORY: ${NATSUI_NATS_LOGIN_SHARED_HISTORY:-0}
+      NATSUI_NATS_LOGIN_SHARED_MONITORING: ${NATSUI_NATS_LOGIN_SHARED_MONITORING:-0}
+      NATSUI_ALLOW_WRITES: ${NATSUI_ALLOW_WRITES:-0}
+    networks: [broker]
+    volumes:
+      - history:/data
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    mem_limit: 512m
+    pids_limit: 128
+    logging:
+      driver: json-file
+      options: {max-size: 5m, max-file: '2'}
+networks:
+  broker:
+    external: true
+    name: ${NATS_NETWORK:?Set NATS_NETWORK to the existing Docker network}
+volumes:
+  history:
+    name: natsui-data

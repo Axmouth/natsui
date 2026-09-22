@@ -3,13 +3,13 @@ import path from 'node:path';
 
 const pages = [
   ['SETUP.md', 'setup.html', 'Setup guide'],
+  ['NATS_LOGIN.md', 'nats-login.html', 'NATS sign-in'],
   ['ANSIBLE.md', 'ansible.html', 'Ansible deployment'],
   ['SHARED_ACCESS.md', 'shared-access.html', 'Shared access'],
   ['MONITORING_SECURITY.md', 'monitoring-security.html', 'Monitoring security'],
   ['PROFILES.md', 'profiles.html', 'Connection profiles'],
   ['MANAGED.md', 'managed.html', 'Managed NATS'],
   ['OIDC.md', 'oidc.html', 'SSO sign-in'],
-  ['NATS_LOGIN.md', 'nats-login.html', 'NATS sign-in'],
   ['JWT_AUTHORITY.md', 'jwt-authority.html', 'JWT account authority'],
 ];
 const escape = (text) =>
@@ -55,7 +55,7 @@ function inline(text) {
     (_, index) => tokens[Number(index)],
   );
 }
-export function renderMarkdown(markdown, page) {
+export function renderMarkdown(markdown, page, headings = []) {
   const lines = markdown.split(/\r?\n/),
     output = [],
     slugs = new Map();
@@ -96,13 +96,14 @@ export function renderMarkdown(markdown, page) {
       slugs.set(base, count + 1);
       const id = base + (count ? '-' + count : '');
       const level = Math.min(heading[1].length + 1, 6);
+      if (heading[1].length === 2) headings.push({ id, label: heading[2] });
       output.push(
         '<h' +
           level +
           ' id="' +
           id +
           '">' +
-          inline(heading[2]) +
+          '<a class="heading-link" href="#' + id + '">' + inline(heading[2]) + '</a>' +
           '</h' +
           level +
           '>',
@@ -163,7 +164,9 @@ export function renderMarkdown(markdown, page) {
 export async function buildGuides(root, out) {
   for (const [source, destination, title] of pages) {
     const markdown = await readFile(path.join(root, 'docs', source), 'utf8');
-    const body = renderMarkdown(markdown, destination.replace('.html', ''));
+    const headings = [];
+    const body = renderMarkdown(markdown, destination.replace('.html', ''), headings);
+    const contents = '<nav class="guide-toc" aria-label="On this page"><details><summary>On this page</summary><ol>' + headings.map(({id, label}) => '<li><a href="#' + id + '">' + escape(label) + '</a></li>').join('') + '</ol></details></nav>';
     const nav = pages
       .map(([, file, label]) => '<a href="' + file + '">' + label + '</a>')
       .join('');
@@ -175,7 +178,7 @@ export async function buildGuides(root, out) {
         title +
         '</h1></section><nav class="guide-nav" aria-label="Deployment guides">' +
         nav +
-        '</nav><section>' +
+        '</nav>' + contents + '<section>' +
         body +
         '</section></main><footer><a href="./">Natsui</a><span id="copy-status" role="status" aria-live="polite"></span></footer></body></html>\n',
     );
