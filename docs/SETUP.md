@@ -373,7 +373,9 @@ A native process outside Docker usually cannot resolve Compose service names. Us
 
 ## Verify the connection and troubleshoot
 
-For the main path, sign in with the existing NATS user. For the dashboard-key alternative, run docker exec natsui natsui login, or the equivalent Compose exec command, and open the one-time link. Check the cluster connection status and stream inventory. Nodes requires shared monitoring to be enabled for NATS sessions. Three successful, shared monitoring endpoints should show 3/3 reporting. Empty inventory can be valid for a new application account. An unavailable/error status is not an empty cluster. Existing streams should match the selected NATS account and JetStream domain. HTTP readiness alone is not proof of broker access or healthy monitoring.
+Start with [deployment checks](DOCTOR.md) for configuration errors. An explicit identity probe then checks NATS authentication and selected read APIs without consuming messages.
+
+For the main path, sign in with the existing NATS user. For the dashboard-key alternative, run docker exec natsui natsui login, or the equivalent Compose exec command, and open the one-time link. Check the cluster connection status and stream inventory. In session-only mode, enable Session node monitoring on Nodes. This uses the signed-in identity through NATS system services and reports responding nodes with total cluster size unknown. In background mode, three successfully collected and explicitly shared HTTP monitoring endpoints should show 3/3 reporting. Empty inventory can be valid for a new application account. An unavailable/error status is not an empty cluster. Existing streams should match the selected NATS account and JetStream domain. HTTP readiness alone is not proof of broker access or healthy monitoring.
 
 Use the same Compose file list as the selected start command when inspecting, updating or stopping the deployment. For example, the main NATS login recipe uses:
 

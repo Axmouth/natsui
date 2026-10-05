@@ -61,19 +61,19 @@ The start command resumes it. Adding `-v` to the stop command deletes this demo'
 
 ## Connect an existing NATS server
 
-The standalone image runs alongside an existing NATS service on its Docker network:
+The recommended setup uses existing NATS sign-in and private session history, with no collector account. The [step-by-step setup guide](docs/SETUP.md) covers network discovery, TLS and certificate sign-in. For an existing password-authenticated NATS service on a trusted private Docker network:
 
 ```sh
-docker run -d --name natsui --network NATS_NETWORK -p 127.0.0.1:4321:4321 -e NATSUI_URL=nats://NATS_SERVICE:4222 -v natsui-data:/data --read-only --cap-drop ALL --security-opt no-new-privileges:true ghcr.io/axmouth/natsui:latest
+docker run -d --name natsui --network NATS_NETWORK -p 127.0.0.1:4321:4321 -e NATSUI_URL=nats://NATS_SERVICE:4222 -e NATSUI_NATS_LOGIN=1 -e NATSUI_NATS_LOGIN_SESSION_ONLY=1 -v natsui-data:/data --read-only --cap-drop ALL --security-opt no-new-privileges:true ghcr.io/axmouth/natsui:latest
 ```
 
-`NATS_NETWORK` and `NATS_SERVICE` identify the existing network and broker. Natsui requires no Docker socket access. The root [compose.yaml](compose.yaml) also supports a broker on the host through `host.docker.internal`.
+`NATS_NETWORK` and `NATS_SERVICE` identify the existing network and broker. Open http://127.0.0.1:4321 and sign in with an existing NATS username and password. NATS must already require authentication. Natsui requires no Docker socket access. The root [compose.yaml](compose.yaml) also supports a broker on the host through `host.docker.internal`.
 
 Alternatively, build the embedded native binary with Rust 1.94 or later and a C toolchain:
 
 ```sh
 cargo build --release --locked
-NATSUI_URL=nats://127.0.0.1:4222 NATSUI_PROFILE=local ./target/release/natsui
+NATSUI_URL=nats://127.0.0.1:4222 NATSUI_PROFILE=local NATSUI_NATS_LOGIN=1 NATSUI_NATS_LOGIN_SESSION_ONLY=1 ./target/release/natsui
 ```
 
 <details>
@@ -83,20 +83,32 @@ NATSUI_URL=nats://127.0.0.1:4222 NATSUI_PROFILE=local ./target/release/natsui
 cargo build --release --locked
 $env:NATSUI_URL = 'nats://127.0.0.1:4222'
 $env:NATSUI_PROFILE = 'local'
+$env:NATSUI_NATS_LOGIN = '1'
+$env:NATSUI_NATS_LOGIN_SESSION_ONLY = '1'
 .\target\release\natsui.exe
 ```
 
 </details>
 
-The binary serves its own UI and stores history in SQLite. No Node runtime, separate database service, broker plugin or Docker socket is required. The root `compose.yaml` also packages the dashboard for an existing broker.
+The binary serves its own UI. Session observations stay in memory until sign-out or expiry. SQLite on disk stores dashboard-owned settings and identities. No Node runtime, separate database service, broker plugin or Docker socket is required. The root `compose.yaml` also packages the dashboard for an existing broker.
 
-Use a dedicated restricted NATS identity. [Security and permissions](SECURITY.md) includes the permission template, credentials-file setup, private CA and mutual TLS options. `NATSUI_URL` also accepts comma-separated server addresses for the same cluster/account. Startup uses the first successful authenticated connection and retains the other seeds for reconnects. Optional `NATSUI_MONITOR_URLS` lists separate HTTP endpoints for per-node process and connection monitoring.
+Use a NATS identity with the intended observation permissions. Session-only deployments do not mount collector credentials. [Security and permissions](SECURITY.md) includes the permission template, credentials-file setup, private CA and mutual TLS options. `NATSUI_URL` also accepts comma-separated server addresses for the same cluster/account. Session-only mode connects on sign-in and on subsequent requests using the first successful authenticated seed. Optional session node monitoring uses NATS system services. The alternative background collector retains seeds for reconnects and uses separate `NATSUI_MONITOR_URLS` HTTP endpoints.
 
 [Full configuration, storage limits and troubleshooting context](docs/OPERATIONS.md)
 
+## Check the deployment
+
+For the container named natsui from the quick start:
+
+```sh
+docker exec natsui natsui doctor --require-session-only
+```
+
+This checks the container configuration without contacting NATS. The [deployment checker guide](docs/DOCTOR.md) provides Compose commands, downloadable probe mounts, password and certificate examples, result explanations and Ansible integration. Live probes use an explicitly supplied identity and do not consume messages or edit the deployment.
+
 ## Dashboard login and persistent history
 
-Optional [NATS-backed login](docs/NATS_LOGIN.md) accepts existing NATS usernames/passwords or optional client certificates. Live reads and operations use that user's credentials. Session-only mode needs no collector account and records private history only while the dashboard is open. Background collection and profile-wide history/monitoring sharing remain separate deployment options.
+The recommended [NATS-backed login](docs/NATS_LOGIN.md) accepts existing NATS usernames/passwords or optional client certificates. Live reads and operations use that user's credentials. Session-only mode needs no collector account and records private history only while the dashboard is open. Background collection and profile-wide history/monitoring sharing remain separate deployment options.
 
 The image stores SQLite in `/data`. **Mount the whole directory** with `-v natsui-data:/data`. Mounting only the database file omits SQLite's WAL/SHM companions. Named volumes survive container replacement. A volume is not a backup, and `docker compose down -v` deletes non-external project volumes.
 

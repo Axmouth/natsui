@@ -84,3 +84,5 @@ scripts/test-doctor.mjs verifies no network traffic from default checks, no data
 The existing desktop/mobile session browser regression passed against the new binary, covering collector-free startup, private histories, profile boundaries, certificate uploads and logout. Generated Pages links, JavaScript syntax, and Compose configuration with and without the server-TLS overlay passed.
 
 Docker Engine was unavailable, so the container image was not built or executed locally. Ansible examples were not deployed. These results do not establish remote CI completion, publication, volume durability or reverse-proxy correctness. Existing deployments were not restarted.
+
+Diagnostic guide follow-up: generated Pages links and section anchors passed with both downloadable probe overlays. Docker Compose configuration passed for password probes, password probes with private-CA TLS, and certificate probes with private-CA TLS. These were configuration checks only, without container execution.

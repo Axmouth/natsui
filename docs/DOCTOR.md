@@ -1,6 +1,19 @@
 # Check a deployment with natsui doctor
 
-The natsui binary includes a deployment checker. It shares the dashboard's login-policy, profile, connection, TLS and startup-setting validators. No source checkout or separate diagnostic image is required. NATS sign-in with session-only history is the recommended path and the default in compose.nats-login.yaml. Existing runtime defaults remain unchanged.
+Run natsui doctor to find missing or conflicting settings and get a suggested correction. The command is included in the normal binary and container image. It uses the same configuration checks as the dashboard. NATS sign-in with session-only history is the recommended path and the default in compose.nats-login.yaml. Existing runtime defaults remain unchanged.
+
+## Choose a check
+
+| Task | Start here |
+| --- | --- |
+| Check settings and mounted files | [Container check](#check-inside-the-container), no NATS connection |
+| Service fails before the sign-in page appears | [Temporary container check](#check-inside-the-container) |
+| Check a NATS username and password | [Password probe](#probe-a-nats-user) |
+| Check a user certificate and key | [Certificate probe](#probe-certificate-sign-in) |
+| Understand a failure or partial access | [Read the results](#read-the-results) |
+| Add a deployment check to Ansible | [JSON and exit codes](#automation-and-exit-codes) |
+
+These examples follow the [main setup guide](SETUP.md) and use its .env file, Docker network and Compose recipe. Commands work in PowerShell, Bash and Zsh. Replace alice, ORDERS, fulfilment and staging with actual configured identities and resource names when used. Probe files and Compose overlays belong in the same deployment folder.
 
 ## Check inside the container
 
@@ -26,22 +39,39 @@ Each result has a check ID, status, explanation and correction when needed. Exam
 
 Local validation cannot establish broker permissions. An explicit probe authenticates with the supplied NATS identity through the same connection code used by sign-in. Collector credentials are never used as a fallback.
 
-Create a private UTF-8 file named local-secrets/probe-password containing only the NATS password, with an optional final newline. Keep it outside source control. Mount it read-only through a file named compose.doctor.yaml:
+Create a private UTF-8 file named local-secrets/probe-password containing only the NATS password, with an optional final newline. Keep it outside source control. Download [compose.doctor-password.yaml](../deploy/compose.doctor-password.yaml) into the deployment folder. It mounts that file read-only:
 
 ```yaml
 services:
   dashboard:
     volumes:
-      - ./local-secrets/probe-password:/run/doctor/password:ro
+      - type: bind
+        source: ./local-secrets/probe-password
+        target: /run/doctor/password
+        read_only: true
+        bind:
+          create_host_path: false
 ```
 
 The file must be readable by container UID/GID 10001. The [mounted-file permissions guide](SETUP.md#mounted-file-permissions) covers Linux and Docker Desktop. Then run:
 
 ```sh
-docker compose --env-file .env -f compose.nats-login.yaml -f compose.doctor.yaml run --rm --no-deps dashboard doctor --probe --username alice --password-file /run/doctor/password --require-session-only
+docker compose --env-file .env -f compose.nats-login.yaml -f compose.doctor-password.yaml run --rm --no-deps dashboard doctor --probe --username alice --password-file /run/doctor/password --require-session-only
 ```
 
-Include the TLS overlay when needed. Passwords are not accepted directly as command-line arguments. The report omits passwords, private keys, connection URLs, mounted paths and raw broker responses. Resource names explicitly supplied to the command can appear in suggested API subjects.
+For the private-CA TLS setup from the main guide, use the complete file list:
+
+```sh
+docker compose --env-file .env -f compose.nats-login.yaml -f compose.tls.yaml -f compose.doctor-password.yaml run --rm --no-deps dashboard doctor --probe --username alice --password-file /run/doctor/password --require-session-only
+```
+
+The CA file is local-secrets/ca.pem and NATSUI_URL uses tls:// addresses. Passwords are not accepted directly as command-line arguments. The report omits passwords, private keys, connection URLs, mounted paths and raw broker responses. Resource names explicitly supplied to the command can appear in suggested API subjects.
+
+For a specific stream and consumer, using the same TLS setup:
+
+```sh
+docker compose --env-file .env -f compose.nats-login.yaml -f compose.tls.yaml -f compose.doctor-password.yaml run --rm --no-deps dashboard doctor --probe --username alice --password-file /run/doctor/password --stream ORDERS --consumer fulfilment --require-session-only
+```
 
 The probe checks authentication, stream listing and system monitoring. For resource-specific checks, add --stream ORDERS and optionally --consumer fulfilment. These request stream information, consumer listing and consumer information without pulling or acknowledging messages. Add --profile staging to select an additional configured profile. The default profile is otherwise selected. All profiles receive local validation, but only the selected profile is probed.
 
@@ -49,23 +79,68 @@ System monitoring may be unavailable to a working application user. A timeout do
 
 ## Probe certificate sign-in
 
-Enable NATSUI_NATS_LOGIN_CERTIFICATES=1 and configure NATS certificate identity mapping as described in the [certificate sign-in guide](NATS_LOGIN.md#client-certificate-sign-in). Server trust remains deployment-owned. Mount the probe's user certificate and private key through compose.doctor.yaml:
+Enable NATSUI_NATS_LOGIN_CERTIFICATES=1 and configure NATS certificate identity mapping as described in the [certificate sign-in guide](NATS_LOGIN.md#client-certificate-sign-in). Server trust remains deployment-owned. Download [compose.doctor-certificate.yaml](../deploy/compose.doctor-certificate.yaml) into the deployment folder. It mounts the probe's user certificate and key:
 
 ```yaml
 services:
   dashboard:
     volumes:
-      - ./local-secrets/client.crt:/run/doctor/client.crt:ro
-      - ./local-secrets/client.key:/run/doctor/client.key:ro
+      - type: bind
+        source: ./local-secrets/client.crt
+        target: /run/doctor/client.crt
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./local-secrets/client.key
+        target: /run/doctor/client.key
+        read_only: true
+        bind:
+          create_host_path: false
 ```
 
 ```sh
-docker compose --env-file .env -f compose.nats-login.yaml -f compose.tls.yaml -f compose.doctor.yaml run --rm --no-deps dashboard doctor --probe --certificate-file /run/doctor/client.crt --key-file /run/doctor/client.key --require-session-only
+docker compose --env-file .env -f compose.nats-login.yaml -f compose.tls.yaml -f compose.doctor-certificate.yaml run --rm --no-deps dashboard doctor --probe --certificate-file /run/doctor/client.crt --key-file /run/doctor/client.key --require-session-only
 ```
 
 Certificates accept PEM, PEM bundles or a single DER certificate, including .crt files. Private keys must be matching, unencrypted PEM. These probe mounts must not be assigned to NATSUI_TLS_CERT or NATSUI_TLS_KEY in session-only mode. The probe cannot inspect server configuration to prove verify_and_map is enabled. Successful authentication alone does not establish individual certificate mapping or sufficient API permissions.
 
+## Read the results
+
+A local check can report these lines together:
+
+```text
+[PASS] login.session_only: Session-only mode is configured. History is private to each login and transient.
+[UNKNOWN] probe.identity: No network connection was attempted. Broker authentication, API access and certificate mapping remain untested.
+```
+
+That is expected. The configuration is suitable for session-only mode, but no user has been tested yet. Run an explicit password or certificate probe to check access.
+
+| Result | Meaning and next step |
+| --- | --- |
+| login.policy fails with a shared-history conflict | Keep NATSUI_NATS_LOGIN=1 and NATSUI_NATS_LOGIN_SESSION_ONLY=1. Set both NATSUI_NATS_LOGIN_SHARED_HISTORY and NATSUI_NATS_LOGIN_SHARED_MONITORING to 0, then recreate the service. |
+| profile.default.connection names an unreadable NATSUI_TLS_CA | Check that local-secrets/ca.pem exists, include compose.tls.yaml and make the mounted file readable by UID/GID 10001. |
+| probe.authentication passes but probe.stream_list is unknown | The login worked. Check the account, JetStream availability/domain, API publish permission and reply-inbox subscription. A timeout alone does not identify the cause. |
+| probe.stream_list passes but probe.system_monitoring is unknown | Stream access works. System visibility is separate and often intentionally unavailable to application users. Grant system access only when node monitoring is intended. |
+| profile.default.operations is disabled | The dashboard's write switch is off. For reviewed edits, set NATSUI_ALLOW_WRITES=1 and separately grant only the required NATS operations. Doctor does not test writes. |
+| storage.persistence is unknown | The command did not test volume durability or SQLite writes. Follow the setup guide's storage and readiness checks. |
+
+The full report includes guidance below each relevant check. For a corrected running service, apply the same Compose file list used at startup:
+
+```sh
+docker compose --env-file .env -f compose.nats-login.yaml up -d --wait
+docker compose --env-file .env -f compose.nats-login.yaml exec -T dashboard natsui doctor --require-session-only
+```
+
+Add -f compose.tls.yaml to both commands for that deployment. Recreating the dashboard ends current login sessions. Probe-only overlays are used for temporary checks and are not needed on the running service. An older image without the doctor command needs an image update through the normal deployment process.
+
 ## Automation and exit codes
+
+For a machine-readable local report:
+
+```sh
+docker compose --env-file .env -f compose.nats-login.yaml exec -T dashboard natsui doctor --json --require-session-only
+```
 
 Add --json for a report with format natsui-doctor-v1, version, mode and checks. Each check contains id, status, detail and guidance. Check IDs identify capabilities independently of display wording.
 

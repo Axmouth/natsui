@@ -96,6 +96,8 @@ Historical node observations are removed unless monitoring sharing is also enabl
 
 ## Troubleshooting
 
+Start with [natsui doctor](DOCTOR.md#check-inside-the-container) for local configuration. The [password probe](DOCTOR.md#probe-a-nats-user) and [certificate probe](DOCTOR.md#probe-certificate-sign-in) check a supplied identity. [Result examples](DOCTOR.md#read-the-results) explain partial access and suggested corrections.
+
 | Symptom | Check or next step |
 | --- | --- |
 | The sign-in page only offers a dashboard key | NATSUI_NATS_LOGIN=1 must reach the dashboard container, not just exist in an unused .env entry. The main Compose recipe passes it explicitly. Recreate the service after changing startup configuration. |

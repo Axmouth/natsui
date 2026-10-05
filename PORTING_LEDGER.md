@@ -350,3 +350,7 @@ Verification: all 59 Rust tests with real NATS, strict Clippy, diagnostic regres
 Added beyond Fibril: natsui doctor shares startup validators and reports configuration, mode, trust-file and profile checks with corrective guidance. Explicit identity probes use NATS sign-in connections for bounded stream/consumer metadata and system requests. No collector fallback, configuration editing or application consumption is involved. Unavailable capabilities remain unknown. JSON check IDs and exit codes support Ansible.
 
 NATS session-only sign-in is the recommended setup and the default in the dedicated login Compose recipe. Generic runtime defaults remain compatible with existing deployments. Local checks do not contact NATS or open SQLite. Probes do not establish complete cluster coverage, write permissions, certificate mapping configuration, proxy correctness or storage durability. Verification is recorded in docs/VERIFICATION.md.
+
+## Diagnostic guide examples, 2026-10-05
+
+Added beyond Fibril: downloadable read-only password and certificate probe mounts, complete TLS and resource-check commands, symptom-based corrections and a guide task index. The README quick start and website now lead with NATS session-only sign-in and distinguish transient observations from persistent dashboard state. Existing monitoring troubleshooting now describes both session NATS requests and optional shared HTTP collection.

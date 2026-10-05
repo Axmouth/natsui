@@ -1,0 +1,15 @@
+services:
+  dashboard:
+    volumes:
+      - type: bind
+        source: ./local-secrets/client.crt
+        target: /run/doctor/client.crt
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./local-secrets/client.key
+        target: /run/doctor/client.key
+        read_only: true
+        bind:
+          create_host_path: false
