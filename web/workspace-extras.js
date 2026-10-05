@@ -333,7 +333,7 @@
       const complete = result.nodes.filter(
         (n) => n.status === 'complete',
       ).length;
-      routeStatus.textContent = `${complete}/${result.nodes.length} endpoints complete. ${rows.length} reported routes, up to 100 per endpoint. Observed ${new Date(result.at * 1000).toLocaleTimeString()}.`;
+      routeStatus.textContent = `${complete}/${result.nodes.length} endpoints complete. ${rows.length} reported routes, up to 100 per endpoint. Observed ${new Date(result.at * 1000).toLocaleTimeString()}. ${result.scope || ''}`;
       const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
       svg.setAttribute('viewBox', '0 0 700 320');
       svg.setAttribute('role', 'img');

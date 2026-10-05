@@ -93,16 +93,38 @@ fetch('/api/auth/nats')
       option.textContent = profile.name;
       document.getElementById('nats-profile').append(option);
     }
+    document.getElementById('nats-method-label').hidden = !config.certificates;
     natsForm.hidden = false;
     document.getElementById('key-login').open = false;
-    document.getElementById('login-intro').textContent = 'Sign in with an existing NATS username and password.';
+    document.getElementById('login-intro').textContent = config.certificates ? 'Sign in with a NATS password or client certificate.' : 'Sign in with an existing NATS username and password.';
     document.getElementById('login-note').textContent = 'Live reads and operations use this NATS user. Dashboard administration requires a separate dashboard login.';
     const shared = [config.shared_history && 'collector history', config.shared_monitoring && 'cluster monitoring'].filter(Boolean);
-    document.getElementById('nats-sharing').textContent = shared.length
+    document.getElementById('nats-sharing').textContent = config.session_only
+      ? 'Session history starts here, grows while this dashboard is open, and is discarded at sign-out. No background collector or shared monitoring.'
+      : shared.length
       ? 'This deployment also shares ' + shared.join(' and ') + ' with every NATS user who can sign in to the selected profile.'
       : 'Shared history and cluster monitoring are disabled for NATS logins.';
     document.getElementById('nats-username').focus();
   }).catch(() => {});
+const method = document.getElementById('nats-method');
+const certificateInput = document.getElementById('nats-certificate');
+const keyInput = document.getElementById('nats-private-key');
+method.onchange = () => {
+  const certificate = method.value === 'certificate';
+  document.getElementById('nats-password-fields').hidden = certificate;
+  document.getElementById('nats-certificate-fields').hidden = !certificate;
+  for (const id of ['nats-username', 'nats-password']) {
+    const input = document.getElementById(id);
+    input.disabled = certificate;
+    input.required = !certificate;
+    input.value = '';
+  }
+  for (const input of [certificateInput, keyInput]) {
+    input.disabled = !certificate;
+    input.required = certificate;
+    input.value = '';
+  }
+};
 natsForm.onsubmit = async event => {
   event.preventDefault();
   const button = natsForm.querySelector('button');
@@ -111,10 +133,24 @@ natsForm.onsubmit = async event => {
   button.disabled = true;
   status.textContent = 'Signing in with NATS...';
   try {
+    let credentials;
+    if (method.value === 'certificate') {
+      const certificate = certificateInput.files[0], privateKey = keyInput.files[0];
+      if (!certificate || !privateKey || certificate.size > 98304 || privateKey.size > 32768) {
+        status.textContent = 'Select a certificate up to 96 KiB and an unencrypted PEM key up to 32 KiB.';
+        return;
+      }
+      const bytes = new Uint8Array(await certificate.arrayBuffer());
+      let binary = '';
+      for (const byte of bytes) binary += String.fromCharCode(byte);
+      credentials = { certificate: btoa(binary), private_key: await privateKey.text() };
+    } else {
+      credentials = { username: document.getElementById('nats-username').value, password: password.value };
+    }
     const response = await fetch('/api/auth/nats', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Natsui-Request': '1' },
-      body: JSON.stringify({ profile, username: document.getElementById('nats-username').value, password: password.value }),
+      body: JSON.stringify({ profile, ...credentials }),
     });
     if (response.ok) {
       sessionStorage.setItem('natsui-profile', profile);
@@ -125,5 +161,5 @@ natsForm.onsubmit = async event => {
       ? 'Too many sign-in attempts. Wait one minute and try again.'
       : (await response.text()).slice(0, 250) || 'NATS sign-in is unavailable.';
   } catch { status.textContent = 'The dashboard could not be reached.'; }
-  finally { password.value = ''; button.disabled = false; }
+  finally { password.value = ''; certificateInput.value = ''; keyInput.value = ''; button.disabled = false; }
 };

@@ -33,6 +33,7 @@ fn configuration(value: &Value) -> Value {
         "deliver_policy",
         "replay_policy",
         "inactive_threshold",
+        "pause_until",
     ] {
         if let Some(v) = value.get(key) {
             result.insert(key.into(), v.clone());

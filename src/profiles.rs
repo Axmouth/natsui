@@ -94,14 +94,20 @@ pub async fn router(base: App, directory: &str) -> Result<Router, Box<dyn std::e
                 certificate: profile.certificate,
                 key: profile.key,
                 tls: profile.tls,
+                session_tls: None,
             };
+            if base.auth.nats_policy().session_only {
+                connection.validate_session_only()?;
+            }
             connection.options().await?;
             let binding = connection.binding(&profile.domain)?;
             let directory = PathBuf::from(directory).join("profiles").join(&profile.id);
             let db = store::Database::open(directory.to_str().ok_or("Invalid profile directory")?)?;
             db.bind_profile(&profile.name, false, &binding, false)
                 .await?;
-            let monitor = if let Some(path) = profile.monitor_config_file {
+            let monitor = if base.auth.nats_policy().session_only {
+                monitoring::Monitor::new("")?
+            } else if let Some(path) = profile.monitor_config_file {
                 if !profile.monitor_urls.is_empty() {
                     return Err(
                         "Each profile must choose monitoring URLs or a monitoring config file"
@@ -132,9 +138,11 @@ pub async fn router(base: App, directory: &str) -> Result<Router, Box<dyn std::e
                 scope: profile.name.clone(),
                 connection: Some(connection),
             };
-            tokio::spawn(app.monitor.clone().collect());
-            tokio::spawn(crate::collect(app.clone()));
-            tokio::spawn(crate::incidents::collect(app.clone()));
+            if !base.auth.nats_policy().session_only {
+                tokio::spawn(app.monitor.clone().collect());
+                tokio::spawn(crate::collect(app.clone()));
+                tokio::spawn(crate::incidents::collect(app.clone()));
+            }
             contexts.insert(profile.id.clone(), app.clone());
             apps.insert(profile.id, (profile.name, crate::application_routes(app)));
         }
@@ -144,10 +152,18 @@ pub async fn router(base: App, directory: &str) -> Result<Router, Box<dyn std::e
             if app.demo {
                 return Err("NATS login cannot be used with the simulated demo".into());
             }
-            app.connection
-                .as_ref()
-                .ok_or("NATS login requires a connection profile")?
-                .for_user("validation", "validation")?;
+            if base.auth.nats_policy().session_only {
+                app.connection
+                    .as_ref()
+                    .ok_or("Missing connection profile")?
+                    .validate_session_only()?;
+            }
+            if !base.auth.nats_policy().certificates {
+                app.connection
+                    .as_ref()
+                    .ok_or("NATS login requires a connection profile")?
+                    .for_user("validation", "validation")?;
+            }
         }
     }
     let registry = Registry {
@@ -160,7 +176,7 @@ pub async fn router(base: App, directory: &str) -> Result<Router, Box<dyn std::e
             "/api/auth/nats",
             get(login_options)
                 .post(nats_login)
-                .layer(axum::extract::DefaultBodyLimit::max(4096)),
+                .layer(axum::extract::DefaultBodyLimit::max(196608)),
         )
         .route("/api/profiles", get(list))
         .route(
@@ -181,7 +197,7 @@ pub async fn router(base: App, directory: &str) -> Result<Router, Box<dyn std::e
 async fn login_options(State(registry): State<Registry>) -> Json<Value> {
     let policy = registry.auth.nats_policy();
     Json(
-        json!({"enabled":policy.enabled,"shared_history":policy.history,"shared_monitoring":policy.monitoring,
+        json!({"enabled":policy.enabled,"certificates":policy.certificates,"session_only":policy.session_only,"shared_history":policy.history,"shared_monitoring":policy.monitoring,
         "profiles":if policy.enabled { registry.routes.iter().map(|(id,(name,_))| json!({"id":id,"name":name})).collect::<Vec<_>>() } else { vec![] }}),
     )
 }
@@ -262,6 +278,13 @@ async fn dispatch(State(registry): State<Registry>, request: Request) -> Respons
         };
         return crate::nats_login::dispatch(app.clone(), session, request).await;
     }
+    if scoped && registry.auth.nats_policy().session_only {
+        return (
+            StatusCode::FORBIDDEN,
+            "Sign in with NATS to access session data.",
+        )
+            .into_response();
+    }
     match route.clone().oneshot(request).await {
         Ok(response) => response,
         Err(never) => match never {},
@@ -283,6 +306,8 @@ mod tests {
         let identity = || crate::nats_login::Session {
             profile: "default".into(),
             username: "reader".into(),
+            observations: None,
+            tools: crate::native_tools::SessionTools::new(None).unwrap(),
             connection: connection::Config {
                 url: "nats://127.0.0.1:1".into(),
                 credentials: None,
@@ -290,6 +315,7 @@ mod tests {
                 certificate: None,
                 key: None,
                 tls: false,
+                session_tls: None,
             },
         };
         let cookie = auth.nats_cookie(identity(), &HeaderMap::new()).unwrap();

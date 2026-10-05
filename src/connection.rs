@@ -1,7 +1,33 @@
+use async_nats::rustls::{
+    ClientConfig, RootCertStore,
+    pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject},
+};
 use futures_util::{StreamExt, stream::FuturesUnordered};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::{path::PathBuf, time::Duration};
+
+// Certificate extensions are ambiguous. PEM bundles and single DER certificates
+// use the same validation path for mounted trust, mounted identity and browser uploads.
+fn certificates(bytes: &[u8]) -> Result<Vec<CertificateDer<'static>>, String> {
+    if bytes.is_empty() {
+        return Err("A certificate is required".into());
+    }
+    if let Some(start) = bytes
+        .windows(b"-----BEGIN CERTIFICATE-----".len())
+        .position(|part| part == b"-----BEGIN CERTIFICATE-----")
+    {
+        let certificates = CertificateDer::pem_slice_iter(&bytes[start..])
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| "Invalid PEM certificate")?;
+        if certificates.is_empty() {
+            return Err("A certificate is required".into());
+        }
+        Ok(certificates)
+    } else {
+        Ok(vec![CertificateDer::from(bytes.to_vec())])
+    }
+}
 
 #[derive(Clone)]
 pub struct Config {
@@ -11,6 +37,7 @@ pub struct Config {
     pub certificate: Option<PathBuf>,
     pub key: Option<PathBuf>,
     pub tls: bool,
+    pub session_tls: Option<async_nats::rustls::ClientConfig>,
 }
 
 impl Config {
@@ -22,6 +49,7 @@ impl Config {
             ca: path("NATSUI_TLS_CA"),
             certificate: path("NATSUI_TLS_CERT"),
             key: path("NATSUI_TLS_KEY"),
+            session_tls: None,
             tls: match std::env::var("NATSUI_TLS_REQUIRED").as_deref() {
                 Err(_) | Ok("0") => false,
                 Ok("1") => true,
@@ -163,11 +191,28 @@ impl Config {
         } else if !url.username().is_empty() {
             options = options.token(decode(url.username())?);
         }
-        if let Some(path) = &self.ca {
-            options = options.add_root_certificates(path.clone());
-        }
-        if let (Some(cert), Some(key)) = (&self.certificate, &self.key) {
-            options = options.add_client_certificate(cert.clone(), key.clone());
+        if let Some(config) = &self.session_tls {
+            options = options.tls_client_config(config.clone());
+        } else if self.ca.is_some() || self.certificate.is_some() {
+            let builder = ClientConfig::builder().with_root_certificates(self.trust_roots()?);
+            let config = if let (Some(cert), Some(key)) = (&self.certificate, &self.key) {
+                let cert = tokio::fs::read(cert)
+                    .await
+                    .map_err(|_| "NATS client certificate is not readable")?;
+                let key = tokio::fs::read(key)
+                    .await
+                    .map_err(|_| "NATS client key is not readable")?;
+                builder
+                    .with_client_auth_cert(
+                        certificates(&cert)?,
+                        PrivateKeyDer::from_pem_slice(&key)
+                            .map_err(|_| "An unencrypted PEM private key is required")?,
+                    )
+                    .map_err(|_| "Invalid or mismatched certificate and private key")?
+            } else {
+                builder.with_no_client_auth()
+            };
+            options = options.tls_client_config(config);
         }
         Ok(options
             .name("natsui / read-only")
@@ -178,6 +223,26 @@ impl Config {
                     || urls.iter().any(|u| u.scheme() == "tls"),
             )
             .connection_timeout(Duration::from_secs(3)))
+    }
+
+    fn trust_roots(&self) -> Result<RootCertStore, String> {
+        let mut roots = RootCertStore::empty();
+        let trusted = if let Some(path) = &self.ca {
+            let data = std::fs::read(path).map_err(|_| "NATS CA is not readable")?;
+            certificates(&data)?
+        } else {
+            rustls_native_certs::load_native_certs()
+                .map_err(|_| "System trust store is unavailable")?
+        };
+        for cert in trusted {
+            roots
+                .add(cert)
+                .map_err(|_| "Invalid NATS trust certificate")?;
+        }
+        if roots.is_empty() {
+            return Err("NATS trust store is empty".into());
+        }
+        Ok(roots)
     }
 
     pub fn for_user(&self, username: &str, password: &str) -> Result<Self, String> {
@@ -209,7 +274,70 @@ impl Config {
             certificate: None,
             key: None,
             tls: self.tls,
+            session_tls: None,
         })
+    }
+    pub fn validate_session_only(&self) -> Result<(), String> {
+        let urls = self.urls()?;
+        if self.credentials.is_some()
+            || self.certificate.is_some()
+            || self.key.is_some()
+            || urls
+                .iter()
+                .any(|url| !url.username().is_empty() || url.password().is_some())
+        {
+            return Err("Session-only mode requires credential-free NATS URLs and no collector credentials or client key".into());
+        }
+        self.validate()
+    }
+
+    // Uploaded material is parsed in memory. Trust roots and destinations remain deployment-owned.
+    pub fn certificate_details(bytes: &[u8]) -> Result<serde_json::Value, String> {
+        let chain = certificates(bytes)?;
+        let leaf = chain.first().ok_or("Certificate required")?;
+        let (_, cert) = x509_parser::parse_x509_certificate(leaf.as_ref())
+            .map_err(|_| "Invalid X.509 certificate")?;
+        Ok(
+            json!({"subject":cert.subject().to_string(),"issuer":cert.issuer().to_string(),
+            "not_before":cert.validity().not_before.timestamp(),"expires_at":cert.validity().not_after.timestamp(),
+            "fingerprint":format!("{:x}",Sha256::digest(leaf.as_ref()))}),
+        )
+    }
+    pub fn for_certificate(
+        &self,
+        certificate: &[u8],
+        key: &[u8],
+    ) -> Result<(Self, String), String> {
+        let certs = certificates(certificate)?;
+        let leaf = certs.first().ok_or("A client certificate is required")?;
+        let identity = format!("certificate:{:x}", Sha256::digest(leaf.as_ref()));
+        let private = PrivateKeyDer::from_pem_slice(key)
+            .map_err(|_| "An unencrypted PEM private key is required")?;
+        let tls = ClientConfig::builder()
+            .with_root_certificates(self.trust_roots()?)
+            .with_client_auth_cert(certs, private)
+            .map_err(|_| "Invalid or mismatched certificate and private key")?;
+        let mut urls = self.urls()?;
+        for url in &mut urls {
+            url.set_password(None).map_err(|_| "Invalid NATS address")?;
+            url.set_username("").map_err(|_| "Invalid NATS address")?;
+        }
+        Ok((
+            Self {
+                url: urls
+                    .iter()
+                    .map(|url| url.as_str())
+                    .collect::<Vec<_>>()
+                    .join(","),
+                credentials: None,
+                ca: self.ca.clone(),
+                certificate: None,
+                key: None,
+                tls: true,
+                session_tls: Some(tls),
+            },
+            identity,
+        ))
     }
     pub async fn connect_user(&self) -> Result<async_nats::Client, String> {
         let client = self.connect_inner(true).await?;
@@ -282,6 +410,7 @@ mod tests {
             certificate: None,
             key: None,
             tls: false,
+            session_tls: None,
         }
     }
     #[test]

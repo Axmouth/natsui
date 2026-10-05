@@ -317,3 +317,30 @@ NATS username/password sign-in is the main documented setup path for new deploym
 The guides add a login comparison, symptom-based NATS sign-in troubleshooting, an in-page contents list and section permalinks. Copy controls use format-neutral feedback and restore their original labels. These are documentation and navigation conveniences, new to natsui rather than ports from Fibril.
 
 Verification: Pages link checks, Compose defaults and TLS-overlay rendering, and desktop/mobile browser checks passed. Runtime deployments were not modified.
+
+
+### NATS login sessions and certificate identity
+
+Added beyond Fibril: optional NATSUI_NATS_LOGIN_SESSION_ONLY removes the collector account requirement. Snapshot polling records bounded, private in-memory history per login, using the existing graph and incident queries. No historical collector state or HTTP monitoring is shared. Readiness describes sign-in availability. Session-only operations have no durable audit, and history ends with the session.
+
+Added beyond Fibril: optional NATSUI_NATS_LOGIN_CERTIFICATES accepts PEM or DER client certificates, including .crt, and unencrypted PEM private keys. NATS certificate mapping enforces permissions. Server destinations and trust remain deployment-owned, uploaded signing material remains in session memory, and collector credentials are never inherited. JWT/NKey login and encrypted-key/PFX uploads remain unsupported.
+
+Verification covers real NATS password sessions, certificate mapping, denied operations, certificate/key mismatch, disabled certificate login, separate same-user histories, fresh login after logout, and shared-history regression. Deployment and browser checks are recorded in docs/VERIFICATION.md.
+
+
+## Session investigation tools, 2026-10-05
+
+| Origin | Ported form | Reason and boundary |
+| --- | --- | --- |
+| Fibril progress diagnosis | Consumer delivery-counter progress, monotonic backlog growth and acknowledgment pressure | Adapts observation-based diagnosis. NATS has no equivalent worker heartbeat, so worker death and processing completion remain unknown. Configuration changes, counter resets, gaps and resource recreation break the evidence window. |
+| Fibril age and capacity context | Oldest retained timestamp, configured headroom, retention/discard behavior | Adapts queue-age context to retained streams. It does not equate retention with unprocessed work or physical disk usage. |
+| Fibril incident investigation | Private session activity and observed changes | Reuses the existing Activity and incident views against the per-login database. Session-only records are transient, not a durable audit. |
+| Fibril failure inspection | Bounded native max-delivery and terminated-message advisory watch, with retained-record lookup | Adapts failure signals without inventing a DLQ or acknowledging application messages. Permission uncertainty, watch gaps and possible application-published events remain explicit. |
+| Fibril pause controls | Native reviewed JetStream consumer pause/resume | Adapts delivery pause only. Application execution continues, and already delivered work is not recalled. NATS permissions enforce the operation. |
+| Added beyond Fibril | Certificate subject, issuer, validity, fingerprint and expiry notice | Helps diagnose certificate sessions without returning uploaded signing material. |
+| Added beyond Fibril | Opt-in per-session system-request monitoring | Brings process metrics, connections, subscriptions and routes into session-only mode. No HTTP collector fallback or complete-cluster claim. |
+
+All seven additions are implemented. The static demo shares the diagnostic and retention presentation. Authentication, native monitoring, advisory subscriptions and reviewed writes require a live backend. Feature permission recipes and limits are documented in [NATS login](docs/NATS_LOGIN.md#session-investigation-tools).
+
+
+Verification: all 59 Rust tests with real NATS, strict Clippy, diagnostic regression tests, demo/Pages checks and desktop/mobile browser workflows passed locally. Independent review findings about stale diagnoses, paused histories, lookup cost, monitoring freshness and interrupted-watch coverage were corrected. No new credential-isolation bypass was identified in that review. Details are recorded in docs/VERIFICATION.md.

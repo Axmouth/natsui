@@ -49,7 +49,7 @@ pub fn snapshot(scope: &str, elapsed: u64) -> Snapshot {
         } else {
             last.min(200_000)
         };
-        streams.push(json!({"cluster":{"name":"simulated-cluster","leader":format!("demo-{}",index+1),"replicas":(1..=3).filter(|n|*n!=index+1).map(|n|json!({"name":format!("demo-{n}"),"current":true,"lag":0,"offline":false})).collect::<Vec<_>>()},"created":"2026-09-11T00:00:00Z","config":{"name":name,"subjects":[subject],"retention":if name=="JOBS" {"workqueue"} else {"limits"},"storage":"file","num_replicas":3,"max_msgs":200000,"metadata":{"natsui":"simulation"}},"state":{"messages":retained,"bytes":retained*220,"first_seq":last-retained+1,"last_seq":last,"consumer_count":if name=="JOBS" {1} else {2}}}));
+        streams.push(json!({"cluster":{"name":"simulated-cluster","leader":format!("demo-{}",index+1),"replicas":(1..=3).filter(|n|*n!=index+1).map(|n|json!({"name":format!("demo-{n}"),"current":true,"lag":0,"offline":false})).collect::<Vec<_>>()},"created":"2026-09-11T00:00:00Z","config":{"name":name,"subjects":[subject],"retention":if name=="JOBS" {"workqueue"} else {"limits"},"storage":"file","num_replicas":3,"max_msgs":200000,"max_bytes":-1,"max_age":0,"discard":"old","metadata":{"natsui":"simulation"}},"state":{"messages":retained,"bytes":retained*220,"first_ts":time::OffsetDateTime::from_unix_timestamp(now().saturating_sub(retained/rate) as i64).unwrap().format(&time::format_description::well_known::Rfc3339).unwrap(),"first_seq":last-retained+1,"last_seq":last,"consumer_count":if name=="JOBS" {1} else {2}}}));
         for worker in 0..if name == "JOBS" { 1 } else { 2 } {
             let backlog = if worker == 0 {
                 pending

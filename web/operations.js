@@ -65,6 +65,11 @@
         filter_subject: $('operation-filter').value.trim(),
         deliver_policy: $('operation-deliver').value,
       };
+    if (p.action === 'pause_consumer') {
+      const date=new Date($('operation-pause-until').value);
+      if(!Number.isFinite(date.getTime())){status.textContent='Choose a valid pause end time.';working=false;$('operation-preview').disabled=!enabled;return;}
+      p.config={pause_until:date.toISOString()};
+    }
     if (p.action === 'publish')
       Object.assign(p, {
         mode: $('operation-mode').value,

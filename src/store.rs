@@ -51,10 +51,17 @@ impl Database {
         }
         std::fs::create_dir_all(dir)?;
         let conn = Connection::open(std::path::Path::new(dir).join("natsui.sqlite3"))?;
+        Self::initialize(conn, budget_mb * 1024 * 1024)
+    }
+    pub fn session() -> Result<Self, Box<dyn std::error::Error>> {
+        Self::initialize(Connection::open_in_memory()?, 4 * 1024 * 1024)
+    }
+    fn initialize(conn: Connection, budget: usize) -> Result<Self, Box<dyn std::error::Error>> {
         let version: u32 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
         if version > 3 {
             return Err("Database schema is newer than this application".into());
         }
+        conn.execute_batch("PRAGMA temp_store=MEMORY;")?;
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
             CREATE TABLE IF NOT EXISTS settings (id INTEGER PRIMARY KEY CHECK(id=1), body TEXT NOT NULL);
@@ -80,7 +87,7 @@ impl Database {
         Ok(Self(
             Arc::new(Mutex::new(conn)),
             Arc::new(Mutex::new(BTreeMap::new())),
-            budget_mb * 1024 * 1024,
+            budget,
         ))
     }
     async fn run<T: Send + 'static>(
@@ -110,7 +117,7 @@ impl Database {
     pub fn health(&self) -> Value {
         match self.1.lock() {
             Ok(operations) => {
-                json!({"status":if operations.values().any(|v|v["status"]=="failed") {"degraded"}else{"ok"},"operations":*operations,"history_budget_bytes":self.2,"incident_budget_bytes":16*1024*1024})
+                json!({"status":if operations.values().any(|v|v["status"]=="failed") {"degraded"}else{"ok"},"operations":*operations,"history_budget_bytes":self.2,"incident_budget_bytes":self.2.min(16*1024*1024)})
             }
             Err(_) => json!({"status":"unavailable"}),
         }
@@ -230,6 +237,7 @@ impl Database {
         events: Vec<Value>,
     ) -> Result<(), String> {
         let scope = scope.to_owned();
+        let budget = self.2.min(16 * 1024 * 1024);
         self.run("incidents", move |db| {
             let tx = db.transaction().map_err(|e| e.to_string())?;
             for e in events {
@@ -244,7 +252,7 @@ impl Database {
                 )
                 .map_err(|e| e.to_string())?;
             }
-            prune_bytes(&tx,"incidents",16*1024*1024)?;
+            prune_bytes(&tx,"incidents",budget)?;
             tx.commit().map_err(|e| e.to_string())
         })
         .await
@@ -351,6 +359,44 @@ fn prune_bytes(db: &Connection, table: &str, budget: usize) -> Result<(), String
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn session_storage_is_memory_only_isolated_and_bounded() {
+        let mut db = Database::session().unwrap();
+        let other = Database::session().unwrap();
+        let path: String =
+            db.0.lock()
+                .unwrap()
+                .query_row(
+                    "SELECT file FROM pragma_database_list WHERE name='main'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+        assert!(path.is_empty());
+        assert_eq!(db.2, 4 * 1024 * 1024);
+        let mut sample = crate::simulation::snapshot("session", 0);
+        db.sample(&sample).await.unwrap();
+        let size: usize =
+            db.0.lock()
+                .unwrap()
+                .query_row("SELECT body_bytes FROM samples", [], |row| row.get(0))
+                .unwrap();
+        db.2 = size * 2;
+        for _ in 0..8 {
+            sample.observed_at += 1;
+            db.sample(&sample).await.unwrap();
+        }
+        assert_eq!(
+            db.history("session", true)
+                .await
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+        assert_eq!(other.history("session", true).await.unwrap(), json!([]));
+    }
     #[tokio::test]
     async fn history_budget_preserves_newest_samples() {
         let dir =

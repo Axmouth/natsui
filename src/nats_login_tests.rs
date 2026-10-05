@@ -1,3 +1,6 @@
+#[path = "session_tools_tests.rs"]
+mod session_tools_tests;
+
 use crate::{App, auth, connection, editing, monitoring, nats_login::Policy, store, telemetry};
 use axum::{
     Router,
@@ -27,6 +30,7 @@ fn connection_config(url: &str) -> connection::Config {
         certificate: None,
         key: None,
         tls: false,
+        session_tls: None,
     }
 }
 impl Drop for Broker {
@@ -99,6 +103,13 @@ async fn login(router: &Router, username: &str, password: &str) -> String {
     cookie
 }
 async fn router(url: &str, dir: &std::path::Path, policy: Policy) -> Router {
+    router_config(connection_config(url), dir, policy).await
+}
+async fn router_config(
+    config: connection::Config,
+    dir: &std::path::Path,
+    policy: Policy,
+) -> Router {
     let db = store::Database::open(dir.to_str().unwrap()).unwrap();
     let mut snapshot = telemetry::demo("collector");
     snapshot.demo = false;
@@ -119,7 +130,7 @@ async fn router(url: &str, dir: &std::path::Path, policy: Policy) -> Router {
         demo: false,
         prefix: "$JS.API".into(),
         scope: "collector".into(),
-        connection: Some(connection_config(url)),
+        connection: Some(config),
         settings_cache: Arc::new(RwLock::new(store::Settings::default())),
     };
     crate::profiles::router(app, dir.to_str().unwrap())
@@ -428,6 +439,139 @@ async fn live_nats_login_never_inherits_collector_authority() {
             .await
             .is_err()
     );
+    let session_dashboard = router(
+        &format!("nats://127.0.0.1:{port}"),
+        &directory.join("sessions"),
+        Policy {
+            session_only: true,
+            ..private
+        },
+    )
+    .await;
+    let first = login(&session_dashboard, "writer", password).await;
+    let second = login(&session_dashboard, "writer", password).await;
+    let (_, before, _) = call(
+        &session_dashboard,
+        "/api/history",
+        "GET",
+        &first,
+        Value::Null,
+        "default",
+    )
+    .await;
+    assert_eq!(
+        before,
+        json!([]),
+        "Collector samples must never enter session history"
+    );
+    let (status, snapshot, _) = call(
+        &session_dashboard,
+        "/api/snapshot",
+        "GET",
+        &first,
+        Value::Null,
+        "default",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{snapshot}");
+    assert_eq!(snapshot["dashboard"]["session_history"], true);
+    let (_, recorded, _) = call(
+        &session_dashboard,
+        "/api/history",
+        "GET",
+        &first,
+        Value::Null,
+        "default",
+    )
+    .await;
+    assert_eq!(recorded.as_array().unwrap().len(), 1);
+    assert!(!recorded.to_string().contains("collector-node-secret"));
+    let (_, isolated, _) = call(
+        &session_dashboard,
+        "/api/history",
+        "GET",
+        &second,
+        Value::Null,
+        "default",
+    )
+    .await;
+    assert_eq!(
+        isolated,
+        json!([]),
+        "Even identical usernames have independent histories"
+    );
+    let from = telemetry::now().saturating_sub(60);
+    for path in [
+        format!("/api/history/window?from={from}&to={}", from + 120),
+        format!("/api/history/backlog?from={from}&to={}", from + 120),
+    ] {
+        assert_eq!(
+            call(
+                &session_dashboard,
+                &path,
+                "GET",
+                &first,
+                Value::Null,
+                "default"
+            )
+            .await
+            .0,
+            StatusCode::OK
+        );
+    }
+    assert_eq!(
+        call(
+            &session_dashboard,
+            "/api/monitoring/routes",
+            "GET",
+            &first,
+            Value::Null,
+            "default"
+        )
+        .await
+        .0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        call(
+            &session_dashboard,
+            "/api/auth/logout",
+            "POST",
+            &first,
+            json!({}),
+            "default"
+        )
+        .await
+        .0,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        call(
+            &session_dashboard,
+            "/api/history",
+            "GET",
+            &first,
+            Value::Null,
+            "default"
+        )
+        .await
+        .0,
+        StatusCode::UNAUTHORIZED
+    );
+    let fresh = login(&session_dashboard, "writer", password).await;
+    assert_eq!(
+        call(
+            &session_dashboard,
+            "/api/history",
+            "GET",
+            &fresh,
+            Value::Null,
+            "default"
+        )
+        .await
+        .1,
+        json!([])
+    );
     let shared = router(
         &url,
         &directory.join("shared"),
@@ -601,4 +745,227 @@ async fn password_login_tls_and_unauthenticated_server_boundary() {
     config.certificate = Some(certs.join("client.pem"));
     config.key = Some(certs.join("client.key"));
     assert!(config.for_user(username, password).is_err());
+}
+
+#[tokio::test]
+#[ignore = "Requires NATSUI_TEST_SERVER and NATSUI_TLS_FIXTURES"]
+async fn certificate_login_maps_identity_and_keeps_key_in_memory() {
+    use base64::Engine;
+    let binary = std::env::var("NATSUI_TEST_SERVER").unwrap();
+    let certs = PathBuf::from(std::env::var("NATSUI_TLS_FIXTURES").unwrap());
+    let reservation = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = reservation.local_addr().unwrap().port();
+    let directory =
+        std::env::temp_dir().join(format!("natsui-cert-login-{}-{port}", std::process::id()));
+    std::fs::create_dir_all(&directory).unwrap();
+    let path = directory.join("nats.json");
+    std::fs::write(&path, json!({"host":"127.0.0.1","port":port,
+        "jetstream":{"store_dir":directory.join("jetstream")},
+        "authorization":{"users":[{"user":"CN=natsui-test","permissions":{"publish":{"allow":["$JS.API.STREAM.LIST"]},"subscribe":{"allow":["_INBOX.>"]}}}]},
+        "tls":{"cert_file":certs.join("server.pem"),"key_file":certs.join("server.key"),"ca_file":certs.join("ca.pem"),"verify_and_map":true}
+    }).to_string()).unwrap();
+    drop(reservation);
+    let _broker = Broker {
+        child: start(&binary, &path),
+        directory: directory.clone(),
+    };
+    let mut config = connection_config(&format!("tls://127.0.0.1:{port}"));
+    // The extension does not determine encoding. Deployment CA files can use .crt.
+    std::fs::copy(certs.join("ca.pem"), directory.join("ca.crt")).unwrap();
+    config.ca = Some(directory.join("ca.crt"));
+    let certificate = [
+        b"\xef\xbb\xbf\n  ".as_slice(),
+        &std::fs::read(certs.join("client.pem")).unwrap(),
+    ]
+    .concat();
+    let key = std::fs::read(certs.join("client.key")).unwrap();
+    let (identity, fingerprint) = config.for_certificate(&certificate, &key).unwrap();
+    assert!(
+        identity.credentials.is_none() && identity.certificate.is_none() && identity.key.is_none()
+    );
+    assert!(fingerprint.starts_with("certificate:"));
+    assert!(
+        config
+            .for_certificate(
+                &certificate,
+                &std::fs::read(certs.join("server.key")).unwrap()
+            )
+            .is_err()
+    );
+    let mut ready = false;
+    for _ in 0..50 {
+        if identity.connect_user().await.is_ok() {
+            ready = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(
+        ready,
+        "Mapped certificate must authenticate without password"
+    );
+    let policy = Policy {
+        enabled: true,
+        certificates: true,
+        session_only: true,
+        ..Default::default()
+    };
+    let dashboard = router_config(config.clone(), &directory.join("dashboard"), policy).await;
+    let body = json!({"profile":"default", "certificate":base64::engine::general_purpose::STANDARD.encode(&certificate), "private_key":std::str::from_utf8(&key).unwrap()});
+    let (status, result, cookie) = call(
+        &dashboard,
+        "/api/auth/nats",
+        "POST",
+        "",
+        body.clone(),
+        "default",
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{result}");
+    let (status, details, _) = call(
+        &dashboard,
+        "/api/session",
+        "GET",
+        &cookie,
+        Value::Null,
+        "default",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        details["certificate"]["subject"]
+            .as_str()
+            .unwrap()
+            .contains("CN=natsui-test")
+    );
+    assert!(details["certificate"]["expires_at"].as_u64().unwrap() > telemetry::now());
+    assert!(!details.to_string().contains("PRIVATE KEY"));
+    let (status, snapshot, _) = call(
+        &dashboard,
+        "/api/snapshot",
+        "GET",
+        &cookie,
+        Value::Null,
+        "default",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(snapshot["snapshot"]["status"], "complete", "{snapshot}");
+    assert_eq!(
+        call(
+            &dashboard,
+            "/api/users",
+            "GET",
+            &cookie,
+            Value::Null,
+            "default"
+        )
+        .await
+        .0,
+        StatusCode::FORBIDDEN
+    );
+    let (status, denied, _) = call(
+        &dashboard,
+        "/api/messages/SECRET/1",
+        "GET",
+        &cookie,
+        Value::Null,
+        "default",
+    )
+    .await;
+    assert!(
+        !status.is_success(),
+        "Mapped user has no message permission: {denied}"
+    );
+    // DER certificates use the same identity and support binary .crt exports.
+    use async_nats::rustls::pki_types::{CertificateDer, pem::PemObject};
+    let der =
+        CertificateDer::from_pem_slice(&std::fs::read(certs.join("client.pem")).unwrap()).unwrap();
+    let mut der_body = body.clone();
+    der_body["certificate"] = json!(base64::engine::general_purpose::STANDARD.encode(der.as_ref()));
+    assert_eq!(
+        call(
+            &dashboard,
+            "/api/auth/nats",
+            "POST",
+            "",
+            der_body,
+            "default"
+        )
+        .await
+        .0,
+        StatusCode::NO_CONTENT
+    );
+    // Mounted CA and client identities support binary DER independently of the file suffix.
+    let ca_der =
+        CertificateDer::from_pem_slice(&std::fs::read(certs.join("ca.pem")).unwrap()).unwrap();
+    std::fs::write(directory.join("ca-der.crt"), ca_der.as_ref()).unwrap();
+    std::fs::write(directory.join("client-der.crt"), der.as_ref()).unwrap();
+    let mut mounted = config.clone();
+    mounted.ca = Some(directory.join("ca-der.crt"));
+    mounted.certificate = Some(directory.join("client-der.crt"));
+    mounted.key = Some(certs.join("client.key"));
+    assert!(mounted.connect().await.is_ok());
+    let chain = [
+        certificate.clone(),
+        std::fs::read(certs.join("ca.pem")).unwrap(),
+    ]
+    .concat();
+    let (chain_identity, chain_fingerprint) = mounted.for_certificate(&chain, &key).unwrap();
+    assert_eq!(chain_fingerprint, fingerprint);
+    assert!(chain_identity.connect_user().await.is_ok());
+    let (_, der_fingerprint) = mounted.for_certificate(der.as_ref(), &key).unwrap();
+    assert_eq!(der_fingerprint, fingerprint);
+    let mut mixed = body.clone();
+    mixed["username"] = json!("collector");
+    assert_eq!(
+        call(&dashboard, "/api/auth/nats", "POST", "", mixed, "default")
+            .await
+            .0,
+        StatusCode::BAD_REQUEST
+    );
+    let mut bad = body.clone();
+    bad["private_key"] = json!("not a key");
+    assert_eq!(
+        call(&dashboard, "/api/auth/nats", "POST", "", bad, "default")
+            .await
+            .0,
+        StatusCode::BAD_REQUEST
+    );
+    let disabled = router_config(
+        config.clone(),
+        &directory.join("disabled"),
+        Policy {
+            certificates: false,
+            ..policy
+        },
+    )
+    .await;
+    assert_eq!(
+        call(&disabled, "/api/auth/nats", "POST", "", body, "default")
+            .await
+            .0,
+        StatusCode::FORBIDDEN
+    );
+    let mut untrusted = config.clone();
+    untrusted.ca = Some(certs.join("server.pem"));
+    assert!(
+        untrusted
+            .for_certificate(&certificate, &key)
+            .unwrap()
+            .0
+            .connect_user()
+            .await
+            .is_err()
+    );
+    config.credentials = Some("collector-creds-must-not-be-read".into());
+    assert!(
+        config
+            .for_certificate(&certificate, &key)
+            .unwrap()
+            .0
+            .connect_user()
+            .await
+            .is_ok()
+    );
 }

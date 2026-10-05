@@ -94,7 +94,7 @@ Use a dedicated restricted NATS identity. [Security and permissions](SECURITY.md
 
 ## Dashboard login and persistent history
 
-Optional [NATS-backed login](docs/NATS_LOGIN.md) accepts existing NATS usernames and passwords. Live reads and operations use that user's credentials. Collector history and HTTP monitoring have separate sharing options, both disabled by default.
+Optional [NATS-backed login](docs/NATS_LOGIN.md) accepts existing NATS usernames/passwords or optional client certificates. Live reads and operations use that user's credentials. Session-only mode needs no collector account and records private history only while the dashboard is open. Background collection and profile-wide history/monitoring sharing remain separate deployment options.
 
 The image stores SQLite in `/data`. **Mount the whole directory** with `-v natsui-data:/data`. Mounting only the database file omits SQLite's WAL/SHM companions. Named volumes survive container replacement. A volume is not a backup, and `docker compose down -v` deletes non-external project volumes.
 

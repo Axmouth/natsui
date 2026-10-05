@@ -1,8 +1,8 @@
 # Set up Natsui and sign in with NATS
 
-The main setup path uses an existing NATS username and password. Live reads and operations run through that user's credentials. NATS enforces access. The dashboard runs beside the cluster, with embedded SQLite in a persistent volume and a separate collector identity for background observations.
+The main setup path uses an existing NATS username and password. Live reads and operations run through that user's credentials. NATS enforces access. The dashboard runs beside the cluster. The main path collects only during a login session and needs no observer account. A persistent volume retains dashboard-owned settings and identities.
 
-This path requires NATS username/password authentication, with optional server TLS. Existing deployments can keep their current Compose files and follow [enable NATS login](NATS_LOGIN.md#enable-the-login-option). NATS JWT/NKey-only or mutual-TLS deployments use the [dashboard-key alternative](#docker-with-an-existing-broker) or [SSO](OIDC.md). The [local cluster demo](#connect-a-docker-cluster-step-by-step) remains a separate keyless tryout.
+This path requires NATS username/password authentication, with optional server TLS. The [client-certificate option](NATS_LOGIN.md#client-certificate-sign-in) supports certificate-mapped NATS users. Existing deployments can keep their current Compose files and follow [enable NATS login](NATS_LOGIN.md#enable-the-login-option). NATS JWT/NKey-only deployments use the [dashboard-key alternative](#docker-with-an-existing-broker) or [SSO](OIDC.md). The [local cluster demo](#connect-a-docker-cluster-step-by-step) remains a separate keyless tryout.
 
 ## 1. Find the existing cluster
 
@@ -15,27 +15,29 @@ docker inspect nats1 --format '{{json .NetworkSettings.Networks}}'
 
 Replace nats1 with an actual broker container name. The network object key, for example myapp_default, becomes NATS_NETWORK. On that network, use the broker service names and their internal client ports, such as nats1:4222. Host mappings such as 14222:4222 do not change that internal address. NATS route ports are not client ports.
 
-The cluster administrator supplies a collector identity with [observation permissions](../deploy/permissions.conf), plus an existing NATS user for browser sign-in. These can be different users. NATS authentication must already be enabled. This recipe starts only the dashboard and does not create or modify broker users.
+An existing NATS user needs [observation permissions](../deploy/permissions.conf) for the intended panels. No collector identity is needed in session-only mode. NATS authentication must already be enabled. This recipe starts only the dashboard and does not create or modify broker users.
 
-## 2. Download the Compose file and configure collection
+## 2. Download the Compose file and configure the connection
 
 Create a folder named natsui-deployment and download [compose.nats-login.yaml](../deploy/compose.nats-login.yaml) into it. Save a file named .env, not .env.txt, beside it:
 
 ```dotenv
 NATS_NETWORK=myapp_default
-NATSUI_URL='nats://OBSERVER:URL_ENCODED_PASSWORD@nats1:4222,nats://nats2:4222,nats://nats3:4222'
-NATSUI_PROFILE=cluster-observer-v2
-NATSUI_MONITOR_URLS=http://nats1:8222,http://nats2:8222,http://nats3:8222
+NATSUI_URL=nats://nats1:4222,nats://nats2:4222,nats://nats3:4222
+NATSUI_PROFILE=cluster-sessions-v1
+NATSUI_NATS_LOGIN_SESSION_ONLY=1
+NATSUI_NATS_LOGIN_CERTIFICATES=0
+NATSUI_MONITOR_URLS=
 NATSUI_NATS_LOGIN_SHARED_HISTORY=0
 NATSUI_NATS_LOGIN_SHARED_MONITORING=0
 NATSUI_ALLOW_WRITES=0
 ```
 
-Replace the example network, server addresses and observer credentials. Percent-encode reserved characters in URL credentials, such as @ as %40 and % as %25. The browser login form accepts the original password without URL encoding. Credentials in .env become container environment values and are visible to Docker administrators. Keep this file outside source control.
+Replace the example network and server addresses. Session-only URLs contain no credentials. The browser login form accepts the original NATS password without URL encoding.
 
-NATSUI_URL supplies the fixed cluster addresses and collector login. The supplied Compose file enables NATSUI_NATS_LOGIN=1. Browser sign-in replaces the collector credentials for live requests. Monitoring uses separate HTTP ports and credentials, and is never inferred from NATS discovery. Leave NATSUI_MONITOR_URLS empty when monitoring is not configured.
+NATSUI_URL supplies fixed cluster addresses. The supplied Compose file enables NATSUI_NATS_LOGIN=1. Session-only mode connects when a user signs in and records only that session's observations. It does not poll HTTP monitoring endpoints. Monitoring uses separate ports and credentials and is never inferred from NATS discovery.
 
-The named natsui-data volume stores SQLite history and settings. The recipe mounts the complete /data directory and requires no dashboard access-key file or authentication volume. Only one dashboard process may write to that volume. Stop an earlier dashboard on port 4321 before starting this recipe.
+The named natsui-data volume stores dashboard settings and identities. Session history stays in memory and is discarded at sign-out. The recipe mounts the complete /data directory and requires no dashboard access-key file or authentication volume. Only one dashboard process may write to that volume. Stop an earlier dashboard on port 4321 before starting this recipe.
 
 ## 3. Configure TLS when required, then start
 
@@ -51,9 +53,9 @@ For private-CA server TLS, download [compose.tls.yaml](../deploy/compose.tls.yam
 docker compose --env-file .env -f compose.nats-login.yaml -f compose.tls.yaml up -d --wait
 ```
 
-With publicly trusted certificates, tls:// can use standard trust without the private-CA overlay. Certificate names must match the configured broker addresses. Credentials crossing an untrusted network require TLS. Client-certificate authentication needs the dashboard-key or SSO branch, because NATS password login does not inherit a collector client certificate.
+With publicly trusted certificates, tls:// can use standard trust without the private-CA overlay. Certificate names must match the configured broker addresses. Credentials crossing an untrusted network require TLS. For certificate authentication, enable the [client-certificate sign-in option](NATS_LOGIN.md#client-certificate-sign-in) and select the user certificate and private key in the browser. The deployment only mounts server trust, not a user key.
 
-Keep the same Compose file list for later logs, updates and shutdown. Readiness checks the collector, so its credentials and JetStream permissions must work even before browser sign-in.
+Keep the same Compose file list for later logs, updates and shutdown. In session-only mode, readiness checks dashboard storage and sign-in availability. Broker connectivity and permissions are checked on login and data requests.
 
 ## 4. Sign in and check live data
 
@@ -61,13 +63,9 @@ Open http://127.0.0.1:4321, select the configured cluster, and enter an existing
 
 Streams, consumers, retained messages and enabled operations use the signed-in user's NATS credentials. A successful login does not grant JetStream API permissions. [Permission examples and troubleshooting](NATS_LOGIN.md#troubleshooting) explain unavailable panels without treating them as empty data.
 
-Historical graphs and node/connection monitoring are initially not shared with NATS sessions. A trusted operations-team deployment can enable either sharing flag in .env, then recreate the dashboard with the same file list:
+Graphs begin with observations from the current login and grow while a dashboard tab is open. A new login starts with empty history. Node and connection monitoring are unavailable in this mode. Session history is bounded and is not a durable audit log.
 
-```sh
-docker compose --env-file .env -f compose.nats-login.yaml up -d --wait --force-recreate
-```
-
-Include -f compose.tls.yaml when it was used at startup. Sharing exposes the collector's profile-wide observations to every accepted NATS user, potentially across NATS accounts. It does not follow each user's subject permissions. Live requests always retain the user's credentials. NATSUI_ALLOW_WRITES=1 enables reviewed operations, which still require NATS permission.
+For unattended collection and persistent history, follow the [background-collection alternative](NATS_LOGIN.md#enable-the-login-option). Set NATSUI_NATS_LOGIN_SESSION_ONLY=0, configure a dedicated collector identity, and optionally configure monitoring. Sharing flags expose collector-wide data to every accepted NATS user and require explicit opt-in. The collector-free path does not accept these sharing flags. NATSUI_ALLOW_WRITES=1 enables reviewed operations, which still require NATS permission.
 
 The dashboard is now ready for local use. [HTTPS deployment](SHARED_ACCESS.md) covers shared browser access. NATS login does not grant dashboard user management, settings changes or controller authority. The following sections describe optional login branches and deployment references.
 
@@ -76,6 +74,7 @@ The dashboard is now ready for local use. [HTTPS deployment](SHARED_ACCESS.md) c
 | Sign-in method | Identity checked by | Credentials used for live NATS requests | Intended path |
 | --- | --- | --- | --- |
 | NATS username/password | NATS | The signed-in NATS user | Main setup path above |
+| NATS client certificate | NATS certificate mapping | The uploaded session certificate | Optional first-class NATS sign-in |
 | Dashboard access key or one-time link | Natsui | The profile's configured collector identity, limited by the dashboard role | Dashboard administration, JWT/NKey or mutual-TLS broker connections |
 | SSO | OIDC provider plus an explicit dashboard-user mapping | The profile's configured collector identity, limited by the mapped dashboard role | Existing organization identity provider |
 
@@ -517,3 +516,8 @@ For Compose deployments, inspect the dashboard's /data mount with docker inspect
 ## NATS login reference
 
 The [NATS login guide](NATS_LOGIN.md) covers permissions, troubleshooting, shared observations and session limits for the main setup path.
+
+
+## Investigation after NATS sign-in
+
+Session-only deployments support consumer progress diagnosis, retention headroom, oldest retained age, private Activity, failure-advisory watches and reviewed delivery pause/resume. Certificate sessions include certificate details and expiry notices. Optional node monitoring requests use the signed-in identity through NATS system services. The [session investigation guide](NATS_LOGIN.md#session-investigation-tools) documents locations, required grants and evidence limits. No additional database service is required.

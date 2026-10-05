@@ -31,13 +31,14 @@ function cell(text,numeric=false){return element('td',text,numeric?'numeric':'')
 function setTable(target, table){ const host=$(target); if(host.firstElementChild?.outerHTML!==table.outerHTML)host.replaceChildren(table); }
 function empty(target,message){$(target).replaceChildren(element('div',message,'empty'));}
 function sortedConsumers(){return [...data.snapshot.consumers].sort((a,b)=>(b.num_pending??0)-(a.num_pending??0));}
+function visibleConsumers(){const query=$('consumer-search').value.toLowerCase();return sortedConsumers().filter(c=>`${c.name} ${c.stream_name}`.toLowerCase().includes(query)&&(!$('behind-only').checked||c.num_pending>data.settings.backlog_threshold));}
 function consumerTable(target, consumers){
  if(!consumers.length){empty(target,data.snapshot.status==='unavailable'?'Consumer information is unavailable.':'No observed consumers match this view.');return;}
  const host=$(target),key=JSON.stringify(consumers.map(c=>[c.stream_name,c.name,c.created]));
  if(host.dataset.rows!==key||!host.querySelector('table')){host.dataset.rows=key;host.replaceChildren(table([['Consumer'],['Pending trend'],['Pending delivery',true],['Awaiting ack',true],['Redelivered',true],['Observation']],consumers.map(()=>[cell(),cell(),cell(null,true),cell(null,true),cell(null,true),cell()])));}
  consumers.forEach((c,index)=>{const cells=host.querySelector('tbody').rows[index].cells;
  if(!cells[0].firstElementChild){const button=element('button',c.name,'name-button');button.onclick=()=>consumerDetail(c);cells[0].append(button,element('span',c.stream_name,'secondary'));}
- const mini=cells[1].firstElementChild||element('div',null,'sparkline');if(!mini.isConnected)cells[1].append(mini);NatsuiTrends.draw(mini,resourceSeries('consumer',consumerIdentity(c),'pending'),{label:`${c.name} / pending deliveries`,mini:true,interval:data.settings.refresh_seconds});cells[2].textContent=number(c.num_pending);cells[3].textContent=number(c.num_ack_pending);cells[4].textContent=number(c.num_redelivered);cells[5].replaceChildren(c.num_pending>data.settings.backlog_threshold?badge('Above threshold','warn'):badge('Within threshold'));
+ const mini=cells[1].firstElementChild||element('div',null,'sparkline');if(!mini.isConnected)cells[1].append(mini);NatsuiTrends.draw(mini,resourceSeries('consumer',consumerIdentity(c),'pending'),{label:`${c.name} / pending deliveries`,mini:true,interval:data.settings.refresh_seconds});cells[2].textContent=number(c.num_pending);cells[3].textContent=number(c.num_ack_pending);cells[4].textContent=number(c.num_redelivered);cells[5].replaceChildren(c.paused===true?badge('Delivery paused','warn'):c.num_pending>data.settings.backlog_threshold?badge('Above threshold','warn'):badge('Within threshold'));
  });
 }
 function consumerDetail(c){location.hash='#consumer?'+new URLSearchParams({stream:c.stream_name,name:c.name});}
@@ -136,12 +137,13 @@ function render(){
  $('largest').textContent=summary.largest?number(summary.largest.pending):s.status==='unavailable'?'--':'0';$('largest-name').textContent=summary.largest?`${summary.largest.name} / ${summary.largest.stream}`:'No observed consumer';
  $('behind').textContent=number(summary.behind);$('threshold-label').textContent=`More than ${number(data.settings.backlog_threshold)} pending deliveries`;$('streams-count').textContent=number(summary.streams);$('consumer-count').textContent=`${number(summary.consumers)} observed consumers`;$('storage').textContent=bytes(summary.stored_bytes);$('nav-streams').textContent=number(summary.streams);$('nav-consumers').textContent=number(summary.consumers);
  const issueNodes=s.issues.map(text=>element('div',text,'issue'));if(s.status==='partial')issueNodes.unshift(element('div','Partial coverage: counts below describe observed resources, not the entire account.','issue'));$('collection-issues').replaceChildren(...issueNodes);
- if(data.dashboard?.login_method==='nats'){issueNodes.push(element('div',`Live data uses the signed-in NATS user. Shared collector history: ${data.dashboard.shared_history?'enabled':'disabled'}. Shared monitoring: ${data.dashboard.shared_monitoring?'enabled':'disabled'}.`,'panel-note'));$('collection-issues').replaceChildren(...issueNodes);}
+ if(data.dashboard?.login_method==='nats'){issueNodes.push(element('div',data.dashboard.session_history ? 'Live data and history belong to this NATS login session. History grows while the dashboard is open and is discarded at sign-out. Node monitoring can be enabled through this NATS identity.' : `Live data uses the signed-in NATS user. Shared collector history: ${data.dashboard.shared_history?'enabled':'disabled'}. Shared monitoring: ${data.dashboard.shared_monitoring?'enabled':'disabled'}.`,'panel-note'));$('collection-issues').replaceChildren(...issueNodes);}
  $('freshness').textContent=`Observed ${new Date(s.observed_at*1000).toLocaleTimeString()} / ${s.status}`;
  renderResources();if(globalThis.renderWorkspace)renderWorkspace();renderAttention();renderChart();consumerTable('overview-table',sortedConsumers().slice(0,5));renderStreams();
- const query=$('consumer-search').value.toLowerCase();consumerTable('consumers-table',sortedConsumers().filter(c=>`${c.name} ${c.stream_name}`.toLowerCase().includes(query)&&(!$('behind-only').checked||c.num_pending>data.settings.backlog_threshold)));
+ consumerTable('consumers-table',visibleConsumers());
  if(document.activeElement!==$('message-stream')){const selected=$('message-stream').value;$('message-stream').replaceChildren(...s.streams.map(stream=>{const option=element('option',stream.config.name);option.value=stream.config.name;return option;}));if([...$('message-stream').options].some(o=>o.value===selected))$('message-stream').value=selected;}
  syncMessages();
+ if(globalThis.renderSessionTools)renderSessionTools();
  if(!settingsDirty){$('setting-threshold').value=data.settings.backlog_threshold;$('setting-refresh').value=data.settings.refresh_seconds;$('setting-retention').value=data.settings.retention_days;}
 }
 async function refresh(){
@@ -248,6 +250,7 @@ function replicas(s){
 }
 function renderMonitorCoverage(monitor, disconnected=false){
  const host=$('monitor-coverage'),nodes=monitor?.nodes||[];
+ if(monitor?.source==='session_nats'){const count=disconnected?0:nodes.filter(n=>n.status==='complete'&&Date.now()/1000-n.at<=15).length;host.dataset.state=count?'partial':'unavailable';host.textContent=`${count} NATS ${count===1?'responder':'responders'} / total unknown`;host.title=disconnected?'Monitoring could not refresh. Earlier samples remain in history.':monitor.detail;return;}
  const reporting=nodes.filter(n=>n.status==='complete'&&Date.now()/1000-n.at<=15).length;
  let state='neutral',label='Monitoring not configured',detail='Set NATSUI_MONITOR_URLS to enable node monitoring.';
  if(monitor?.status==='restricted'){state='neutral';label='Monitoring not shared';detail=monitor.detail;}

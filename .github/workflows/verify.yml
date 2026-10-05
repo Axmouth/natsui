@@ -34,6 +34,7 @@ jobs:
           cargo test --locked -- --include-ignored
           node scripts/test-ui-contract.mjs
           node scripts/test-trends.mjs
+          node scripts/test-diagnostics.mjs
           node scripts/test-demo.mjs
           for file in web/*.js scripts/*.mjs; do node --check "$file"; done
       - name: Package native binary and demo
@@ -53,6 +54,8 @@ jobs:
           NATSUI_OIDC_BROWSER=1 node scripts/smoke-oidc.mjs target/release/natsui
           NATSUI_WORKSPACE_BROWSER=1 node scripts/smoke-workspace.mjs target/release/natsui
           node scripts/smoke-nats-login.mjs target/release/natsui
+          node scripts/smoke-nats-sessions.mjs target/release/natsui
+          node scripts/smoke-session-tools.mjs target/release/natsui
       - uses: actions/upload-artifact@v4
         with:
           name: natsui-${{ runner.os }}-${{ runner.arch }}

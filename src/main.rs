@@ -8,6 +8,7 @@ mod incidents;
 mod managed;
 mod messages;
 mod monitoring;
+mod native_tools;
 mod nats_login;
 #[cfg(test)]
 mod nats_login_tests;
@@ -86,7 +87,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let auth = auth::Auth::from_env()?;
     managed::initialize()?;
+    let session_only = auth.nats_policy().session_only;
     let demo = std::env::args().any(|a| a == "--demo");
+    if demo && session_only {
+        return Err("Session-only mode requires real NATS login".into());
+    }
     let port: u16 = std::env::var("NATSUI_PORT")
         .unwrap_or("4321".into())
         .parse()?;
@@ -124,6 +129,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(connection::Config::from_env()?)
     };
     let binding = if let Some(config) = &connection {
+        if session_only {
+            config.validate_session_only()?;
+        }
         config.options().await?;
         config.binding(&domain)?
     } else {
@@ -136,8 +144,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::env::var("NATSUI_ADOPT_LEGACY_PROFILE").as_deref() == Ok("1"),
     )
     .await?;
-    let monitor = monitoring::Monitor::from_env()?;
-    if !demo {
+    let monitor = if session_only {
+        monitoring::Monitor::new("")?
+    } else {
+        monitoring::Monitor::from_env()?
+    };
+    if !demo && !session_only {
         tokio::spawn(monitor.clone().collect());
     }
     let allow_writes = match std::env::var("NATSUI_ALLOW_WRITES").as_deref() {
@@ -177,8 +189,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         scope,
     };
-    tokio::spawn(collect(app.clone()));
-    tokio::spawn(incidents::collect(app.clone()));
+    if !session_only {
+        tokio::spawn(collect(app.clone()));
+        tokio::spawn(incidents::collect(app.clone()));
+    }
     let router = profiles::router(app, &dir).await?;
     let listener = tokio::net::TcpListener::bind(address).await?;
     println!(
@@ -405,6 +419,31 @@ fn application_routes(app: App) -> Router {
         .route("/api/history/window", get(history_window))
         .route("/api/history/backlog", get(backlog_history))
         .route("/api/activity", get(activity))
+        .route("/api/watch", get(native_tools::watch))
+        .route("/api/session", get(native_tools::session_info))
+        .route(
+            "/api/session/monitoring",
+            axum::routing::post(native_tools::set_monitoring)
+                .layer(axum::extract::DefaultBodyLimit::max(1024)),
+        )
+        .route(
+            "/diagnostics.js",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/javascript")],
+                    include_str!("../web/diagnostics.js"),
+                )
+            }),
+        )
+        .route(
+            "/session-tools.js",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/javascript")],
+                    include_str!("../web/session-tools.js"),
+                )
+            }),
+        )
         .route("/api/incidents", get(incident_history))
         .route("/api/monitoring/{kind}", get(monitor_inventory))
         .route("/api/editing", get(editing::capabilities))
@@ -512,7 +551,11 @@ async fn network_request(
 }
 
 async fn snapshot(State(app): State<App>) -> Json<Value> {
-    let state = app.current.read().await.clone();
+    let mut state = app.current.read().await.clone();
+    for consumer in &mut state.consumers {
+        consumer["natsui_configuration"] =
+            json!(resources::configuration_identity(&consumer["config"]));
+    }
     let settings = match app.db.settings().await {
         Ok(settings) => {
             *app.settings_cache.write().await = settings.clone();
@@ -527,6 +570,19 @@ async fn snapshot(State(app): State<App>) -> Json<Value> {
 async fn readiness(State(app): State<App>) -> (StatusCode, Json<Value>) {
     let state = app.current.read().await;
     let health = app.db.health();
+    if app.auth.nats_policy().session_only {
+        let ready = health["status"] == "ok";
+        return (
+            if ready {
+                StatusCode::OK
+            } else {
+                StatusCode::SERVICE_UNAVAILABLE
+            },
+            Json(
+                json!({"ready":ready,"collection":"on_sign_in","storage":health,"version":env!("CARGO_PKG_VERSION")}),
+            ),
+        );
+    }
 
     let interval = app.settings_cache.read().await.refresh_seconds;
     let fresh = telemetry::now().saturating_sub(state.observed_at) <= interval * 3 + 20;

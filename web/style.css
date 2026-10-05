@@ -40,3 +40,5 @@ html[data-theme="light"] .flavor-item[data-flavor=""] .swatch{background:#ae5644
 .chart-window{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);white-space:nowrap}
 .chart-window select{width:auto;padding:5px 24px 5px 8px;font:inherit}
 .route-graph svg{width:100%;max-height:360px}.route-edge{stroke:var(--line-2);stroke-width:2}.route-node{fill:var(--accent)}.route-node.unknown{fill:var(--muted)}.route-graph text{fill:var(--text);font:12px var(--mono)}
+
+.session-insights{margin-top:18px}.session-insights p{overflow-wrap:anywhere}.session-insights td{white-space:normal;min-width:120px;line-height:1.6}

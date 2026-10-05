@@ -42,3 +42,17 @@ An independent read-only reviewer inspected the implementation and a corrective 
 The follow-up review found no additional blocking credential-isolation or shared-data issue. New NATS-session endpoints require an explicit route classification. This is a dashboard data-source boundary, not a parallel NATS permission model.
 
 Fresh connections simplify credential revocation but add authentication and connection traffic. The implementation reconstructs the route service with a request-specific App, reusing handlers without threading credentials through each endpoint. These tradeoffs are acceptable at the documented session limits. Pooling would require explicit identity binding, permission-change handling and isolation tests before replacing this approach.
+
+## Session investigation review, 2026-10-05
+
+An independent read-only review covered session routing, native monitoring, failure watches, certificate metadata, pause/resume and frontend diagnosis. No new credential-isolation or authorization bypass was identified. Findings corrected during the review were:
+
+- History can lag a snapshot. Diagnosis now requires matching current counters and configuration identity, and excludes paused historical observations.
+- Repeated searches through every historical consumer caused quadratic lookup cost. The new diagnostic view indexes history once and renders only on its active page.
+- Monitoring sampled before a slow JetStream inventory could already be stale on arrival. Native monitoring is sampled after inventory collection.
+- A successful resume omits the false paused field. Verification now checks the validated consumer response and cleared pause time.
+- Subscription streams can remain open after connection loss. The bounded watch checks connection state and records interrupted coverage explicitly.
+
+Native tools reuse sanitized monitoring projections, the existing review-token store and private session storage. New feature behavior remains separate from connection and authentication policy. Existing frontend globals and full-page rendering remain architectural constraints. The diagnostic changes do not establish large-inventory performance for every older view.
+
+Real-broker and browser regressions cover the corrected paths. The reviewer inspected source without independently running those tests. This review does not qualify container deployment or long-duration operation.

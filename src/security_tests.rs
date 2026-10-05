@@ -78,6 +78,7 @@ authorization {{users: [
             certificate: tls.then(|| certs.join("client.pem")),
             key: tls.then(|| certs.join("client.key")),
             tls,
+            session_tls: None,
         }
     }
     async fn client(&self, user: &str, password: &str, tls: bool) -> async_nats::Client {

@@ -305,7 +305,7 @@ impl Monitor {
         )
     }
 }
-fn project_inventory(kind: &str, raw: &Value) -> Result<Value, String> {
+pub(crate) fn project_inventory(kind: &str, raw: &Value) -> Result<Value, String> {
     if kind == "routes" {
         let rows = raw["routes"]
             .as_array()
@@ -438,7 +438,7 @@ fn parse_urls(config: &str) -> Result<Vec<reqwest::Url>, String> {
     }
     Ok(urls)
 }
-fn project_node(v: &Value, slot: usize, at: u64) -> Value {
+pub(crate) fn project_node(v: &Value, slot: usize, at: u64) -> Value {
     if !v["server_id"].is_string() || !v["start"].is_string() {
         return json!({"slot":slot,"at":at,"status":"unavailable","error":"Invalid NATS server identity"});
     }

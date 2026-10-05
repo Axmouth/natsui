@@ -1,5 +1,10 @@
 use crate::telemetry::Snapshot;
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
+
+pub fn configuration_identity(config: &Value) -> String {
+    format!("{:x}", Sha256::digest(config.to_string()))
+}
 
 // Identity and compact counters are sufficient for trends; payloads and full
 // configuration are deliberately excluded from historical samples.
@@ -14,7 +19,7 @@ pub fn project(snapshot: &Snapshot, monitoring: &Value) -> Value {
     let consumers: Vec<Value> = snapshot.consumers.iter().map(|c| {
         let stream = snapshot.streams.iter().find(|s| s["config"]["name"] == c["stream_name"]);
         json!({"name":c["name"],"stream":c["stream_name"],"created":c["created"],"stream_created":stream.map(|s| &s["created"]),
-            "pending":c["num_pending"],"ack_pending":c["num_ack_pending"],"redelivered":c["num_redelivered"],"waiting":c["num_waiting"],
+            "configuration":configuration_identity(&c["config"]),"paused":c["paused"],"pending":c["num_pending"],"ack_pending":c["num_ack_pending"],"redelivered":c["num_redelivered"],"waiting":c["num_waiting"],
             "delivered":c["delivered"]["consumer_seq"],"ack_floor":c["ack_floor"]["consumer_seq"],"max_ack_pending":c["config"]["max_ack_pending"]})
     }).collect();
     json!({"streams":streams,"consumers":consumers,"monitoring":monitoring})

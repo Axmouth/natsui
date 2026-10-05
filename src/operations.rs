@@ -231,6 +231,27 @@ fn normalize(p: &mut Proposal) -> Result<String, Error> {
             }
             p.config = normalized;
         }
+        "pause_consumer" => {
+            let until = p
+                .config
+                .get("pause_until")
+                .and_then(Value::as_str)
+                .ok_or_else(|| bad("Pause time is required"))?;
+            let timestamp =
+                time::OffsetDateTime::parse(until, &time::format_description::well_known::Rfc3339)
+                    .map_err(|_| bad("Use an RFC3339 pause time"))?
+                    .unix_timestamp();
+            let now = telemetry::now() as i64;
+            if timestamp <= now
+                || timestamp > now + 7 * 86400
+                || p.config.as_object().is_none_or(|v| v.len() != 1)
+            {
+                return Err(bad("Pause must end in the next seven days"));
+            }
+        }
+        "resume_consumer" => {
+            p.config = json!({"pause_until":"0001-01-01T00:00:00Z"});
+        }
         "delete_stream" | "delete_consumer" => {}
         _ => return Err(bad("Unsupported operation")),
     }
@@ -305,10 +326,14 @@ pub async fn preview(
             "Resource already exists. No creation request was sent.",
         ));
     }
-    if proposal.action.starts_with("delete") && observed.is_none() {
+    if (proposal.action.starts_with("delete")
+        || proposal.action == "pause_consumer"
+        || proposal.action == "resume_consumer")
+        && observed.is_none()
+    {
         return Err(conflict("Resource no longer exists."));
     }
-    let mut result = json!({"expires_in":60,"confirmation":confirmation,"proposal":proposal,"current":observed,"warning":if proposal.action=="delete_stream"{"Deletion removes retained records and all consumers. NATS has no atomic revision-checked deletion. External replacement between revalidation and deletion cannot be excluded."}else if proposal.action=="delete_consumer"{"Deletion removes the durable cursor and delivery state. It does not stop application processes. NATS has no atomic revision-checked deletion."}else if proposal.action=="publish"{"Core acceptance does not prove storage or processing. JetStream acknowledgment proves storage in the named stream, not application processing. A timeout has an uncertain outcome. No automatic retry is sent."}else{"Creation applies live. Retention and capture rules affect storage and delivery. No application worker is started."}});
+    let mut result = json!({"expires_in":60,"confirmation":confirmation,"proposal":proposal,"current":observed,"warning":if proposal.action=="delete_stream"{"Deletion removes retained records and all consumers. NATS has no atomic revision-checked deletion. External replacement between revalidation and deletion cannot be excluded."}else if proposal.action=="delete_consumer"{"Deletion removes the durable cursor and delivery state. It does not stop application processes. NATS has no atomic revision-checked deletion."}else if proposal.action=="publish"{"Core acceptance does not prove storage or processing. JetStream acknowledgment proves storage in the named stream, not application processing. A timeout has an uncertain outcome. No automatic retry is sent."}else if proposal.action=="pause_consumer" || proposal.action=="resume_consumer" {"Changes future consumer delivery. Already delivered work remains in flight. Application processes continue. External changes cannot be atomically excluded."}else{"Creation applies live. Retention and capture rules affect storage and delivery. No application worker is started."}});
     let token = app.editor.operation_pending.insert(
         app.auth.review_owner(&headers),
         Preview {
@@ -333,7 +358,10 @@ pub async fn apply(
         &app.auth.review_owner(&headers),
         |preview| preview.confirmation == approval.confirmation,
     )?;
-    let p = preview.proposal;
+    let mut p = preview.proposal;
+    if p.action == "pause_consumer" {
+        normalize(&mut p)?;
+    }
     let client = client(&app).await?;
     if !crate::editing::supported(&client.server_info().version) {
         return Err(bad("Connected server no longer supports native operations"));
@@ -380,6 +408,10 @@ pub async fn apply(
                 format!("CONSUMER.CREATE.{}.{}", p.stream, p.consumer),
                 json!({"stream_name":p.stream,"config":p.config,"action":"create"}),
             ),
+            "pause_consumer" | "resume_consumer" => (
+                format!("CONSUMER.PAUSE.{}.{}", p.stream, p.consumer),
+                p.config.clone(),
+            ),
             "delete_stream" => (format!("STREAM.DELETE.{}", p.stream), json!({})),
             "delete_consumer" => (
                 format!("CONSUMER.DELETE.{}.{}", p.stream, p.consumer),
@@ -391,7 +423,28 @@ pub async fn apply(
             Ok(_) => {
                 let observed = lookup(&client, &app.prefix, &p).await;
                 let verified = observed.as_ref().is_ok_and(|state| {
-                    if p.action.starts_with("delete") {
+                    if p.action == "pause_consumer" {
+                        state.as_ref().is_some_and(|v| {
+                            v["paused"] == true
+                                && v["config"]["pause_until"].as_str().and_then(|s| {
+                                    time::OffsetDateTime::parse(
+                                        s,
+                                        &time::format_description::well_known::Rfc3339,
+                                    )
+                                    .ok()
+                                }) == p.config["pause_until"].as_str().and_then(|s| {
+                                    time::OffsetDateTime::parse(
+                                        s,
+                                        &time::format_description::well_known::Rfc3339,
+                                    )
+                                    .ok()
+                                })
+                        })
+                    } else if p.action == "resume_consumer" {
+                        state.as_ref().is_some_and(|v| {
+                            v["paused"] != true && v["config"]["pause_until"].is_null()
+                        })
+                    } else if p.action.starts_with("delete") {
                         state.is_none()
                     } else {
                         state.is_some()
@@ -412,7 +465,13 @@ pub async fn apply(
             } else {
                 "operation_uncertain"
             },
-            &detail,
+            &format!(
+                "{detail}, outcome={}",
+                match &result {
+                    Ok(value) => value.to_string(),
+                    Err(_) => "unconfirmed, inspect current state".into(),
+                }
+            ),
         )
         .await
         .is_ok();

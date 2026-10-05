@@ -24,5 +24,7 @@ natsui_client_key_source: ''
 
 # Shared data is profile-wide and does not inherit individual NATS permissions.
 natsui_nats_login: false
+natsui_nats_login_session_only: false
+natsui_nats_login_certificates: false
 natsui_nats_login_shared_history: false
 natsui_nats_login_shared_monitoring: false

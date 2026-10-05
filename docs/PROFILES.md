@@ -55,4 +55,4 @@ Policy changes require container recreation. Existing browser tabs then reconnec
 
 ## Optional NATS login
 
-[NATS-backed login](NATS_LOGIN.md) accepts existing NATS usernames and passwords. Live requests use the signed-in user credentials. Collector history and HTTP monitoring require separate deployment opt-ins. Dashboard administration retains its own identity boundary.
+[NATS-backed login](NATS_LOGIN.md) accepts existing NATS usernames/passwords or optional client certificates. Session-only mode applies to every profile and rejects collector credentials in all profiles. Live requests use the signed-in user credentials. Collector history and HTTP monitoring require separate deployment opt-ins. Dashboard administration retains its own identity boundary.

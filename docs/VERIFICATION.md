@@ -51,3 +51,26 @@ Existing OIDC signed-token, mapping, profile and revocation checks passed. SSE c
 Generated Pages links, downloaded recipe paths, section anchors and static demo isolation passed. Docker Compose configuration checks verified that compose.nats-login.yaml enables NATS login without a dashboard-key volume, preserves /data storage, defaults both sharing flags and writes to disabled, and combines with the server-TLS overlay.
 
 A disposable headless Edge check verified copy success and selection fallback, format-neutral announcements, restoration of both guide and landing-page button labels, in-page contents links, heading permalinks and a 390-pixel mobile viewport without horizontal page overflow. Desktop and mobile screenshots were inspected. This was documentation and static-site verification. No running deployment was changed.
+
+## Session-only NATS and certificate login, 2026-10-05
+
+Local verification used Rust 1.94.0, NATS Server 2.11.8 and disposable TLS fixtures. All 58 Rust tests passed, including ignored real-broker tests. Formatting, strict Clippy, UI route contracts, trend logic, simulation invariants, JavaScript syntax and generated Pages links passed.
+
+The certificate regression checks mapped NATS identity, permission denial, mismatched keys, invalid keys, disabled certificate login, untrusted server certificates, and removal of collector authentication. PEM certificates with preambles/BOM, PEM bundles and single DER certificates authenticate successfully. Mounted DER CA and client certificates use the same parser as browser uploads. Private keys remain unencrypted PEM.
+
+Session regressions verify empty initial history, isolation between separate logins with the same username, discarded history after logout, valid graph window queries, closed monitoring access, and bounded in-memory history and retained snapshots. The review identified an unbounded retained snapshot and an inaccurate incident budget report. Both were corrected and covered by regression checks.
+
+scripts/smoke-nats-sessions.mjs passed in headless Edge on desktop and mobile viewports. It starts the actual dashboard with two profiles against a TCP connection counter and verifies no NATS or monitoring connection before login. It then starts a disposable real NATS server, signs in through the form with both PEM and binary DER files named client.crt, verifies session history, rejected cross-profile requests, key mismatch feedback, cleared file inputs, empty history after a new login, revoked cookies, and no lingering connections or collection after logout. Screenshots are saved under data/browser-check/certificate-login*.png and were inspected. The existing password-login browser regression also passed. The new browser check is included in Linux CI.
+
+Compose configuration validated both new options without starting containers. Docker Engine was unavailable locally, so no container image or Ansible deployment was run. This record describes local verification, not remote CI completion or publication. Existing deployments were not changed.
+
+
+## Session investigation tools, 2026-10-05
+
+Local verification used Rust 1.94.0 and NATS Server 2.11.8. All 59 Rust tests, including the real-broker suite, passed. Strict Clippy, formatting, diagnostic evidence tests, trend tests, static-demo invariants, literal UI routes, JavaScript syntax and generated Pages links passed.
+
+The new real-broker regression verifies native pause and resume with read-back confirmation, denied pause permission, session-owned review tokens, revision conflicts, isolated action diaries, system-account monitoring and denied monitoring without collector fallback. It records a real terminated-message advisory produced by a fixture application, checks separate-login incident isolation and rejects concurrent watches. Broker shutdown during a watch marks the window incomplete.
+
+Diagnostic regressions cover history gaps, partial samples, resource replacement, configuration changes, counter resets, current data contradicting history, paused observation windows and unknown retention limits. Historical consumer lookup is indexed once per visible diagnostic render. Current snapshot and history use the same configuration identity.
+
+Headless Edge checks cover PEM and DER certificate details, expiry metadata, monitoring opt-in and denial, consumer pause/resume through the review form, retention headroom, session Activity, advisory watch controls, native node and connection views, and 390-pixel mobile layout. Screenshots under data/browser-check/session-*.png were inspected. The browser tests are included in Linux CI. These are local checks, not a claim of completed remote CI or publication. Existing running deployments were not restarted.
