@@ -24,13 +24,7 @@ pub struct Policy {
 }
 impl Policy {
     pub fn from_env() -> Result<Self, String> {
-        fn flag(name: &str) -> Result<bool, String> {
-            match std::env::var(name).as_deref() {
-                Ok("1") => Ok(true),
-                Err(std::env::VarError::NotPresent) | Ok("0") => Ok(false),
-                _ => Err(format!("{name} must be 0 or 1")),
-            }
-        }
+        use crate::deployment::flag;
         let policy = Self {
             enabled: flag("NATSUI_NATS_LOGIN")?,
             history: flag("NATSUI_NATS_LOGIN_SHARED_HISTORY")?,

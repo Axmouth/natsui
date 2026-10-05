@@ -6,6 +6,8 @@ NATS permissions remain authoritative. Stream listing returns whatever the NATS 
 
 For a new deployment, start with the [step-by-step setup guide](SETUP.md). It downloads the NATS login Compose file, configures the server addresses, starts the dashboard and signs in with an existing NATS user. The following settings apply when adding this option to an existing deployment.
 
+The [deployment checker](DOCTOR.md) validates this configuration inside the container and can probe a supplied NATS identity without changing deployment settings.
+
 ## Session-only mode
 
 This mode starts without connecting to NATS. Browser sign-in authenticates against the configured cluster, and each live data request uses that session's credentials. No observer account, HTTP monitoring collector or background advisory subscription is required.

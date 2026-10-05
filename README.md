@@ -21,6 +21,8 @@ A local dashboard with read-only access by default for consumer backlogs, stream
 - **Where is the pressure?** See per-node CPU, resident RAM, connections, subscriptions and traffic, alongside stream storage trends and replica placement.
 - **What matches this subject?** Explore stream capture, consumer filters and observed subscription interest. A filter match indicates eligibility, not proof of delivery.
 
+[Deployment checks](docs/DOCTOR.md) explain configuration problems and optionally test access with a supplied NATS user or certificate through `natsui doctor`.
+
 Reported values, derived metrics and unavailable evidence stay distinct. Gaps remain gaps. CPU and RAM describe NATS processes, not container capacity.
 
 <details>

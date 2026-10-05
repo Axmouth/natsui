@@ -43,15 +43,10 @@ impl Settings {
 }
 impl Database {
     pub fn open(dir: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        let budget_mb: usize = std::env::var("NATSUI_HISTORY_MAX_MB")
-            .unwrap_or("128".into())
-            .parse()?;
-        if !(16..=4096).contains(&budget_mb) {
-            return Err("NATSUI_HISTORY_MAX_MB must be between 16 and 4096".into());
-        }
+        let budget = crate::deployment::history_budget()?;
         std::fs::create_dir_all(dir)?;
         let conn = Connection::open(std::path::Path::new(dir).join("natsui.sqlite3"))?;
-        Self::initialize(conn, budget_mb * 1024 * 1024)
+        Self::initialize(conn, budget)
     }
     pub fn session() -> Result<Self, Box<dyn std::error::Error>> {
         Self::initialize(Connection::open_in_memory()?, 4 * 1024 * 1024)

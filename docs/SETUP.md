@@ -57,6 +57,14 @@ With publicly trusted certificates, tls:// can use standard trust without the pr
 
 Keep the same Compose file list for later logs, updates and shutdown. In session-only mode, readiness checks dashboard storage and sign-in availability. Broker connectivity and permissions are checked on login and data requests.
 
+Before browser sign-in, check the deployed environment and mounts:
+
+```sh
+docker compose --env-file .env -f compose.nats-login.yaml exec -T dashboard natsui doctor --require-session-only
+```
+
+Include the TLS overlay when used. Local checks do not connect to NATS. The [deployment checker guide](DOCTOR.md) covers checks before startup, explicit password and certificate probes, capability guidance and Ansible output.
+
 ## 4. Sign in and check live data
 
 Open http://127.0.0.1:4321, select the configured cluster, and enter an existing NATS username and password. No separate dashboard key is needed for this flow.

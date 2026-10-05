@@ -153,3 +153,7 @@ The [JWT authority](JWT_AUTHORITY.md) requires its own service, exclusive persis
 ## NATS-backed login
 
 Setting natsui_nats_login to true enables existing NATS username/password login. The mounted dashboard key remains available for dashboard administration. natsui_nats_login_shared_history and natsui_nats_login_shared_monitoring default to false. These options share collector data with every authenticated NATS user on the selected profile, including users from other NATS accounts. Set natsui_nats_login_session_only to true for no background collector. In that mode, use credential-free natsui_urls, leave collector credentials and client certificate/key source paths empty, and keep both sharing flags false. Readiness checks sign-in availability without connecting to NATS. Set natsui_nats_login_certificates to true for client-certificate sign-in against NATS verify_and_map servers. natsui_ca_source accepts a PEM bundle or a single DER certificate, including .crt files. User certificates and private keys are selected at login, not provisioned as collector files. The [NATS login guide](NATS_LOGIN.md) describes the credential and sharing boundaries.
+
+## Deployment checks
+
+The [deployment checker guide](DOCTOR.md#automation-and-exit-codes) includes a non-mutating command task with JSON output and stable check IDs. NATS session-only sign-in is the recommended path for new setups. The dashboard-key playbook above remains an alternative. Its doctor checks must omit --require-session-only unless the deployment has been converted to that mode.

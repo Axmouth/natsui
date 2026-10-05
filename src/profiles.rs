@@ -19,24 +19,84 @@ struct Configuration {
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Profile {
-    id: String,
-    name: String,
-    urls: Vec<String>,
-    credentials: Option<PathBuf>,
-    ca: Option<PathBuf>,
-    certificate: Option<PathBuf>,
-    key: Option<PathBuf>,
+pub(crate) struct Profile {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) urls: Vec<String>,
+    pub(crate) credentials: Option<PathBuf>,
+    pub(crate) ca: Option<PathBuf>,
+    pub(crate) certificate: Option<PathBuf>,
+    pub(crate) key: Option<PathBuf>,
     #[serde(default)]
-    tls: bool,
+    pub(crate) tls: bool,
     #[serde(default)]
-    domain: String,
+    pub(crate) domain: String,
     #[serde(default)]
-    monitor_urls: Vec<String>,
-    monitor_config_file: Option<String>,
+    pub(crate) monitor_urls: Vec<String>,
+    pub(crate) monitor_config_file: Option<String>,
     #[serde(default)]
-    allow_writes: bool,
+    pub(crate) allow_writes: bool,
 }
+impl Profile {
+    pub(crate) fn monitor(
+        &self,
+        session_only: bool,
+    ) -> Result<monitoring::Monitor, Box<dyn std::error::Error>> {
+        if session_only {
+            monitoring::Monitor::new("")
+        } else if let Some(path) = &self.monitor_config_file {
+            if !self.monitor_urls.is_empty() {
+                return Err(
+                    "Each profile must choose monitoring URLs or a monitoring config file".into(),
+                );
+            }
+            monitoring::Monitor::from_file(path)
+        } else {
+            monitoring::Monitor::new(&self.monitor_urls.join(","))
+        }
+    }
+    pub(crate) fn connection(&self) -> connection::Config {
+        connection::Config {
+            url: self.urls.join(","),
+            credentials: self.credentials.clone(),
+            ca: self.ca.clone(),
+            certificate: self.certificate.clone(),
+            key: self.key.clone(),
+            tls: self.tls,
+            session_tls: None,
+        }
+    }
+}
+pub(crate) fn definitions() -> Result<Vec<Profile>, Box<dyn std::error::Error>> {
+    let Some(path) = std::env::var_os("NATSUI_PROFILES_FILE") else {
+        return Ok(vec![]);
+    };
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)?
+        .take(65537)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() > 65536 {
+        return Err("Profile configuration exceeds 64 KiB".into());
+    }
+    let config: Configuration =
+        serde_json::from_slice(&bytes).map_err(|_| "Invalid profile configuration")?;
+    if config.profiles.len() > 7 {
+        return Err("At most seven additional profiles are supported".into());
+    }
+    let mut ids = std::collections::BTreeSet::from(["default".to_owned()]);
+    for profile in &config.profiles {
+        if !valid_id(&profile.id)
+            || !ids.insert(profile.id.clone())
+            || profile.name.is_empty()
+            || profile.name.len() > 128
+            || (!profile.domain.is_empty() && !telemetry::valid_token(&profile.domain))
+        {
+            return Err("Invalid or duplicate profile identity".into());
+        }
+    }
+    Ok(config.profiles)
+}
+
 #[derive(Clone)]
 struct Registry {
     auth: auth::Auth,
@@ -65,37 +125,10 @@ pub async fn router(base: App, directory: &str) -> Result<Router, Box<dyn std::e
         "default".into(),
         (base.scope.clone(), crate::application_routes(base.clone())),
     );
-    if let Some(path) = std::env::var_os("NATSUI_PROFILES_FILE") {
-        let mut bytes = Vec::new();
-        std::fs::File::open(path)?
-            .take(65537)
-            .read_to_end(&mut bytes)?;
-        if bytes.len() > 65536 {
-            return Err("Profile configuration exceeds 64 KiB".into());
-        }
-        let config: Configuration =
-            serde_json::from_slice(&bytes).map_err(|_| "Invalid profile configuration")?;
-        if config.profiles.len() > 7 {
-            return Err("At most seven additional profiles are supported".into());
-        }
-        for profile in config.profiles {
-            if !valid_id(&profile.id)
-                || apps.contains_key(&profile.id)
-                || profile.name.is_empty()
-                || profile.name.len() > 128
-                || (!profile.domain.is_empty() && !telemetry::valid_token(&profile.domain))
-            {
-                return Err("Invalid or duplicate profile identity".into());
-            }
-            let connection = connection::Config {
-                url: profile.urls.join(","),
-                credentials: profile.credentials,
-                ca: profile.ca,
-                certificate: profile.certificate,
-                key: profile.key,
-                tls: profile.tls,
-                session_tls: None,
-            };
+    {
+        for profile in definitions()? {
+            let connection = profile.connection();
+            connection.validate()?;
             if base.auth.nats_policy().session_only {
                 connection.validate_session_only()?;
             }
@@ -105,19 +138,7 @@ pub async fn router(base: App, directory: &str) -> Result<Router, Box<dyn std::e
             let db = store::Database::open(directory.to_str().ok_or("Invalid profile directory")?)?;
             db.bind_profile(&profile.name, false, &binding, false)
                 .await?;
-            let monitor = if base.auth.nats_policy().session_only {
-                monitoring::Monitor::new("")?
-            } else if let Some(path) = profile.monitor_config_file {
-                if !profile.monitor_urls.is_empty() {
-                    return Err(
-                        "Each profile must choose monitoring URLs or a monitoring config file"
-                            .into(),
-                    );
-                }
-                monitoring::Monitor::from_file(&path)?
-            } else {
-                monitoring::Monitor::new(&profile.monitor_urls.join(","))?
-            };
+            let monitor = profile.monitor(base.auth.nats_policy().session_only)?;
             let app = App {
                 auth: base.auth.clone(),
                 editor: crate::editing::Editor::new(profile.allow_writes),

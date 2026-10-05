@@ -56,3 +56,9 @@ An independent read-only review covered session routing, native monitoring, fail
 Native tools reuse sanitized monitoring projections, the existing review-token store and private session storage. New feature behavior remains separate from connection and authentication policy. Existing frontend globals and full-page rendering remain architectural constraints. The diagnostic changes do not establish large-inventory performance for every older view.
 
 Real-broker and browser regressions cover the corrected paths. The reviewer inspected source without independently running those tests. This review does not qualify container deployment or long-duration operation.
+
+## Deployment diagnostic review, 2026-10-05
+
+An independent read-only review inspected the new CLI, shared validators, profile extraction and real-broker test script. Corrected findings included omitted connection validation for additional profiles, dependent TLS parsing after a failed file-size check, unvalidated collector HTTP monitoring conflicts and overly permissive response-shape checks.
+
+Startup and diagnostics share login policy, connection validation, profile definitions, monitoring construction and deployment-setting parsers. Diagnostic reporting and explicit read probes remain separate from normal collection. Controlled validation errors can identify the failing setting, while external errors and response payloads remain excluded from reports. The reviewer did not run tests independently. Local regression evidence is recorded in VERIFICATION.md.

@@ -4,6 +4,7 @@ import path from 'node:path';
 const pages = [
   ['SETUP.md', 'setup.html', 'Setup guide'],
   ['NATS_LOGIN.md', 'nats-login.html', 'NATS sign-in'],
+  ['DOCTOR.md', 'doctor.html', 'Deployment checks'],
   ['ANSIBLE.md', 'ansible.html', 'Ansible deployment'],
   ['SHARED_ACCESS.md', 'shared-access.html', 'Shared access'],
   ['MONITORING_SECURITY.md', 'monitoring-security.html', 'Monitoring security'],

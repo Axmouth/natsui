@@ -2,6 +2,8 @@ mod auth;
 mod backlog;
 mod buckets;
 mod connection;
+mod deployment;
+mod doctor;
 mod editing;
 mod events;
 mod incidents;
@@ -85,6 +87,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .await;
     }
+    if args.get(1).map(String::as_str) == Some("doctor") {
+        std::process::exit(doctor::run(&args[2..]).await);
+    }
     let auth = auth::Auth::from_env()?;
     managed::initialize()?;
     let session_only = auth.nats_policy().session_only;
@@ -92,19 +97,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if demo && session_only {
         return Err("Session-only mode requires real NATS login".into());
     }
-    let port: u16 = std::env::var("NATSUI_PORT")
-        .unwrap_or("4321".into())
-        .parse()?;
-    let bind = match std::env::var("NATSUI_CONTAINER").as_deref() {
-        Ok("1") => [0, 0, 0, 0],
-        Err(_) | Ok("0") => [127, 0, 0, 1],
-        _ => return Err("NATSUI_CONTAINER must be 0 or 1".into()),
+    let port = deployment::port()?;
+    let bind = if deployment::flag("NATSUI_CONTAINER")? {
+        [0, 0, 0, 0]
+    } else {
+        [127, 0, 0, 1]
     };
     let address = SocketAddr::new(IpAddr::from(bind), port);
-    let domain = std::env::var("NATSUI_DOMAIN").unwrap_or_default();
-    if !domain.is_empty() && !telemetry::valid_token(&domain) {
-        return Err("Invalid JetStream domain".into());
-    }
+    let domain = deployment::domain()?;
     let scope = std::env::var("NATSUI_PROFILE").unwrap_or("Local NATS".into());
     let dir = std::env::var("NATSUI_DATA_DIR").unwrap_or("data".into());
     let db = store::Database::open(&dir)?;
@@ -152,11 +152,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !demo && !session_only {
         tokio::spawn(monitor.clone().collect());
     }
-    let allow_writes = match std::env::var("NATSUI_ALLOW_WRITES").as_deref() {
-        Ok("1") => !demo,
-        Err(_) | Ok("0") => false,
-        _ => return Err("NATSUI_ALLOW_WRITES must be 0 or 1".into()),
-    };
+    let allow_writes = deployment::flag("NATSUI_ALLOW_WRITES")? && !demo;
     println!(
         "Dashboard authentication: {}",
         if auth.enabled() {

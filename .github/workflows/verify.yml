@@ -41,6 +41,7 @@ jobs:
         shell: bash
         run: |
           cargo build --release --locked
+          node scripts/test-doctor.mjs target/release/natsui${{ runner.os == 'Windows' && '.exe' || '' }}
           node scripts/smoke-monitor-security.mjs target/release/natsui${{ runner.os == 'Windows' && '.exe' || '' }}
           node scripts/smoke-oidc.mjs target/release/natsui${{ runner.os == 'Windows' && '.exe' || '' }}
           node scripts/smoke-workspace.mjs target/release/natsui${{ runner.os == 'Windows' && '.exe' || '' }}

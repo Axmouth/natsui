@@ -74,3 +74,13 @@ The new real-broker regression verifies native pause and resume with read-back c
 Diagnostic regressions cover history gaps, partial samples, resource replacement, configuration changes, counter resets, current data contradicting history, paused observation windows and unknown retention limits. Historical consumer lookup is indexed once per visible diagnostic render. Current snapshot and history use the same configuration identity.
 
 Headless Edge checks cover PEM and DER certificate details, expiry metadata, monitoring opt-in and denial, consumer pause/resume through the review form, retention headroom, session Activity, advisory watch controls, native node and connection views, and 390-pixel mobile layout. Screenshots under data/browser-check/session-*.png were inspected. The browser tests are included in Linux CI. These are local checks, not a claim of completed remote CI or publication. Existing running deployments were not restarted.
+
+## Deployment doctor, 2026-10-05
+
+Local checks used Rust 1.94.0 and NATS Server 2.11.8. All 61 Rust tests, including the real-broker suite, passed after the shared configuration and profile changes. Final response-shape changes passed the two focused diagnostic tests, strict Clippy and a fresh build. The real-broker doctor script passed again against the final binary.
+
+scripts/test-doctor.mjs verifies no network traffic from default checks, no database creation, secret redaction, invalid policy and TLS settings, additional-profile validation, oversized-file rejection before parsing/probing, HTTP monitoring conflicts, session-only monitoring exclusion and storage-path errors. Live tests cover a restricted application user, a system user, rejected credentials and DER client-certificate mapping. Broker configuration remains unchanged. These checks are included in native and container verification jobs.
+
+The existing desktop/mobile session browser regression passed against the new binary, covering collector-free startup, private histories, profile boundaries, certificate uploads and logout. Generated Pages links, JavaScript syntax, and Compose configuration with and without the server-TLS overlay passed.
+
+Docker Engine was unavailable, so the container image was not built or executed locally. Ansible examples were not deployed. These results do not establish remote CI completion, publication, volume durability or reverse-proxy correctness. Existing deployments were not restarted.
