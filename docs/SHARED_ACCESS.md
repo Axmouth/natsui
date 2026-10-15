@@ -27,6 +27,10 @@ Role changes, disabling, deletion and key rotation invalidate that user's sessio
 
 Named user records contain key digests, roles and revisions in access.sqlite3 inside NATSUI_DATA_DIR. Permanent user keys are never stored in plaintext. The entire data directory must persist and be included in stopped backups. Access keys are not human passwords or multi-factor authentication. Optional [OIDC sign-in](OIDC.md) maps explicitly configured provider subjects to these same local users. All configured profiles use the same dashboard identity store. Optional [profile membership](PROFILES.md) restricts resource access.
 
+## HTTPS without a proxy
+
+The [native HTTPS guide](HTTPS.md) provides certificate mounts, a Compose overlay and verified local health checks. It works with NATS session-only sign-in and dashboard identities.
+
 ## HTTPS through a trusted reverse proxy
 
 NATSUI_PUBLIC_URL opts into one explicit HTTPS origin. Startup requires dashboard authentication. Host and Origin must match that origin. Forwarded headers do not expand the accepted host set. Cookies gain Secure, and responses include a restrictive content security policy and no-referrer policy.
@@ -52,7 +56,7 @@ natsui.example.com {
 
 The DNS name must resolve to that host and the proxy must obtain a trusted certificate. A proxy running in a container instead connects to dashboard:4321 on a dedicated private Docker network. In that arrangement the dashboard does not need a published port. Only the proxy's HTTPS endpoint should be externally reachable. The proxy must preserve the original Host header. TLS termination does not authorize access by itself.
 
-The dashboard's direct HTTP listener is an internal hop. NATSUI_PUBLIC_URL does not enable TLS on that listener. Loopback health checks and the authenticated login-ticket CLI endpoint remain available for local administration. Other dashboard HTTP requests require the configured public Host and browser sessions use Secure cookies.
+With this proxy recipe, the dashboard's HTTP listener is an internal hop. NATSUI_PUBLIC_URL alone does not enable TLS on that listener. Native HTTPS additionally requires NATSUI_HTTPS_CERT and NATSUI_HTTPS_KEY. Loopback health checks and the authenticated login-ticket CLI endpoint remain available for local administration. Other dashboard HTTP requests require the configured public Host and browser sessions use Secure cookies.
 
 
 ## Optional NATS login

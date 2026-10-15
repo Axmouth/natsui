@@ -8,6 +8,8 @@ For a new deployment, start with the [step-by-step setup guide](SETUP.md). It do
 
 The [deployment checker](DOCTOR.md) validates this configuration inside the container and can probe a supplied NATS identity without changing deployment settings.
 
+The dashboard can [serve HTTPS directly](HTTPS.md) with a mounted server certificate and key. Browser HTTPS and broker TLS have independent settings.
+
 ## Session-only mode
 
 This mode starts without connecting to NATS. Browser sign-in authenticates against the configured cluster, and each live data request uses that session's credentials. No observer account, HTTP monitoring collector or background advisory subscription is required.
@@ -106,6 +108,7 @@ Start with [natsui doctor](DOCTOR.md#check-inside-the-container) for local confi
 | Streams work but a message cannot be inspected | Message-get permission is separate from inventory permission. The record may also have expired or been deleted. Only an explicit no-record reply establishes absence. |
 | Live data works but historical graphs are not shared | Session-only graphs start at sign-in. In background mode, NATSUI_NATS_LOGIN_SHARED_HISTORY defaults to 0. Enable it only when sharing all collector history for that profile is intended, then recreate the service. |
 | Nodes or connections are unavailable | In session-only mode, enable Session node monitoring on Nodes. The NATS identity needs system service access as described below. In background mode, HTTP monitoring sharing is a separate deployment opt-in. |
+| Streams work, monitoring is enabled, but Nodes stays empty after refresh | A valid JetStream user may lack access to the system account services. Check both the account export/import and the user permissions. [Why this happens](#why-jetstream-access-does-not-imply-node-access) explains the separate requirements. A missing reply can also reflect routing or connectivity. |
 | A permitted operation is disabled | The profile also needs NATSUI_ALLOW_WRITES=1. If NATS rejects an enabled operation, check the signed-in user's API permissions. |
 | Dashboard settings or user management are unavailable | These require a separate dashboard administrator login. A NATS administrator username does not grant dashboard authority. |
 | Certificate login fails | Check that certificate sign-in is enabled, the key matches the certificate, the certificate is valid and trusted by NATS, and verify_and_map resolves it to an allowed user. The browser must send an unencrypted PEM key. |
@@ -194,6 +197,61 @@ permissions: {
 ```
 
 Each request waits up to 1.2 seconds and accepts up to 32 replies and 4 MB total. Missing replies may reflect permissions, network conditions or unavailable servers. The coverage indicator always treats total cluster size as unknown. Inventories request pages of 100 entries where the server supports pagination. ROUTEZ is a bounded projection of its response. Disabling monitoring stops future monitoring requests and keeps earlier observations in the same session history.
+
+### Why JetStream access does not imply node access
+
+A NATS account is an isolated messaging context containing users, subjects and JetStream resources. It is not a username. A user named natsadmin in an application account does not automatically belong to the configured system account.
+
+For example, observer can list streams in OPS while node metrics are served in SYS. Publishing the same subject in both accounts does not connect them. Even broad publish permission inside OPS does not bypass account isolation.
+
+| Requirement | Purpose |
+| --- | --- |
+| SYS exports a monitoring service to OPS | The service owner permits that account to access it. |
+| OPS imports that service from SYS | Requests in OPS can reach the exported service. |
+| observer has the required publish and reply-subscription grants | The particular user can send the request and receive its reply. |
+
+All three are needed for this cross-account path. An import exposes the selected service, not the entire system account. It neither copies streams nor changes the user's identity. A user already in SYS needs no cross-account import, but still needs the applicable user permissions.
+
+Natsui's Enable monitoring button requests observations with the signed-in identity. It does not create imports, change broker permissions or substitute an administrator identity. The following tested example supplies a narrow VARZ import for an application account. [NATS account and service configuration](https://github.com/nats-io/nats.docs/blob/master/running-a-nats-service/configuration/securing_nats/accounts.md) describes the underlying boundaries.
+
+### An application account with node metrics
+
+An enabled toggle with no node rows means no usable system reply was observed. It does not mean the cluster is empty. The page distinguishes this from monitoring being off. Reloading retains the session choice. Stream API access alone is not system-service access.
+
+For configuration-file accounts, this example exposes only VARZ node metrics from SYS to an application account named OPS. Merge the relevant entries into the existing broker account configuration, preserving current users and settings. Apply account changes consistently through the deployment's existing NATS configuration process. This is an administrator change, not a dashboard setting.
+
+```text
+system_account: SYS
+accounts: {
+  SYS: {
+    exports: [
+      { service: "$SYS.REQ.SERVER.PING.VARZ", accounts: [OPS], response_type: stream }
+    ]
+  }
+  OPS: {
+    jetstream: enabled
+    imports: [
+      { service: { account: SYS, subject: "$SYS.REQ.SERVER.PING.VARZ" } }
+    ]
+    users: [
+      {
+        user: observer
+        password: REPLACE_WITH_A_STRONG_PASSWORD
+        permissions: {
+          publish: { allow: ["$JS.API.STREAM.LIST", "$SYS.REQ.SERVER.PING.VARZ"] }
+          subscribe: { allow: ["_INBOX.>"] }
+        }
+      }
+    ]
+  }
+}
+```
+
+The response_type permits multiple server replies. This example allows stream listing and node metrics only. Consumer details, message bodies, connections, subscriptions and routes need their separate grants. For connection inventories, an administrator can explicitly export/import the required system subjects listed above and grant them to the intended user. System data can reveal activity across accounts, so account access should reflect the intended operational visibility.
+
+JWT/operator deployments configure equivalent exports/imports and permissions through their account authority. The [NATS account documentation](https://github.com/nats-io/nats.docs/blob/master/running-a-nats-service/configuration/securing_nats/accounts.md) describes the distinction between service imports and ordinary publish grants. Natsui does not infer or broaden those grants.
+
+After applying the intended access, sign in and enable Session node monitoring. The [doctor identity probe](DOCTOR.md#probe-a-nats-user) can check the same VARZ request independently. A working result confirms responding nodes, not complete cluster coverage. Network failures and missing reply permissions remain other possible reasons for no data.
 
 ## Session lifetime and limits
 

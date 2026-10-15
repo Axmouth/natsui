@@ -1,5 +1,9 @@
 name: Verify and package
-on: [push, pull_request, workflow_dispatch]
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
@@ -36,11 +40,13 @@ jobs:
           node scripts/test-trends.mjs
           node scripts/test-diagnostics.mjs
           node scripts/test-demo.mjs
+          node scripts/test-release-version.mjs
           for file in web/*.js scripts/*.mjs; do node --check "$file"; done
       - name: Package native binary and demo
         shell: bash
         run: |
           cargo build --release --locked
+          node scripts/smoke-https.mjs target/release/natsui${{ runner.os == 'Windows' && '.exe' || '' }}
           node scripts/test-doctor.mjs target/release/natsui${{ runner.os == 'Windows' && '.exe' || '' }}
           node scripts/smoke-monitor-security.mjs target/release/natsui${{ runner.os == 'Windows' && '.exe' || '' }}
           node scripts/smoke-oidc.mjs target/release/natsui${{ runner.os == 'Windows' && '.exe' || '' }}

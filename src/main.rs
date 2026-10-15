@@ -6,6 +6,7 @@ mod deployment;
 mod doctor;
 mod editing;
 mod events;
+mod https;
 mod incidents;
 mod managed;
 mod messages;
@@ -90,7 +91,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if args.get(1).map(String::as_str) == Some("doctor") {
         std::process::exit(doctor::run(&args[2..]).await);
     }
+    if args.get(1).map(String::as_str) == Some("healthcheck") {
+        if args.len() != 2 {
+            return Err("Usage: natsui healthcheck".into());
+        }
+        let (status, _) = https::local_request(deployment::port()?, "/healthz", None).await?;
+        if !status.is_success() {
+            return Err("Dashboard health check failed".into());
+        }
+        return Ok(());
+    }
     let auth = auth::Auth::from_env()?;
+    let https = https::Configuration::from_env()?;
     managed::initialize()?;
     let session_only = auth.nats_policy().session_only;
     let demo = std::env::args().any(|a| a == "--demo");
@@ -192,7 +204,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let router = profiles::router(app, &dir).await?;
     let listener = tokio::net::TcpListener::bind(address).await?;
     println!(
-        "natsui: http://{address} ({})",
+        "natsui: {}://{address} ({})",
+        if https.is_some() { "https" } else { "http" },
         if demo {
             "DEMO simulation"
         } else {
@@ -203,11 +216,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     );
-    axum::serve(listener, router)
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
-        })
-        .await?;
+    let shutdown = async {
+        let _ = tokio::signal::ctrl_c().await;
+    };
+    if let Some(tls) = https {
+        axum::serve(tls.listener(listener), router)
+            .with_graceful_shutdown(shutdown)
+            .await?;
+    } else {
+        axum::serve(listener, router)
+            .with_graceful_shutdown(shutdown)
+            .await?;
+    }
     Ok(())
 }
 

@@ -248,8 +248,16 @@ function replicas(s){
  const peers=s.cluster.replicas||[];
  return `Leader: ${s.cluster.leader||'unknown'}. ${peers.length} observed followers. `+peers.map(p=>`${p.name}: ${p.offline?'offline':p.current?'current':'not current'}${p.lag!=null?`, lag ${number(p.lag)}`:''}`).join('; ');
 }
+function monitoringView(monitor){
+ const choice=globalThis.sessionMonitoringChoice?.();
+ if(monitor?.source==='session_nats'&&choice&&choice.revision>monitor.revision)return {...monitor,enabled:choice.enabled,revision:choice.revision,nodes:[],status:choice.enabled?'connecting':'restricted',detail:choice.enabled?'Monitoring enabled. Waiting for a new observation.':'Session monitoring is off.'};
+ return monitor;
+}
 function renderMonitorCoverage(monitor, disconnected=false){
+ monitor=monitoringView(monitor);
  const host=$('monitor-coverage'),nodes=monitor?.nodes||[];
+ if(monitor?.source==='session_nats'&&monitor.enabled===false){host.dataset.state='neutral';host.textContent='Session monitoring off';host.title=monitor.detail;return;}
+ if(monitor?.source==='session_nats'&&monitor.status==='connecting'){host.dataset.state='partial';host.textContent='Querying NATS monitoring';host.title=monitor.detail;return;}
  if(monitor?.source==='session_nats'){const count=disconnected?0:nodes.filter(n=>n.status==='complete'&&Date.now()/1000-n.at<=15).length;host.dataset.state=count?'partial':'unavailable';host.textContent=`${count} NATS ${count===1?'responder':'responders'} / total unknown`;host.title=disconnected?'Monitoring could not refresh. Earlier samples remain in history.':monitor.detail;return;}
  const reporting=nodes.filter(n=>n.status==='complete'&&Date.now()/1000-n.at<=15).length;
  let state='neutral',label='Monitoring not configured',detail='Set NATSUI_MONITOR_URLS to enable node monitoring.';
@@ -264,9 +272,9 @@ function renderMonitorCoverage(monitor, disconnected=false){
  host.title=detail+(monitor?.demo?'':' CPU and RAM measure NATS processes, not container limits or remaining capacity.');
 }
 function renderResources(){
- const monitor=data.monitoring||{status:'not_configured',nodes:[]},nodes=monitor.nodes||[];
+ const monitor=monitoringView(data.monitoring)||{status:'not_configured',nodes:[]},nodes=monitor.nodes||[];
  renderMonitorCoverage(monitor);
- if(!nodes.length)empty('nodes-table','No server monitoring observations.');
+ if(!nodes.length)empty('nodes-table',monitor.source==='session_nats' ? (monitor.status==='connecting'?'Monitoring enabled. Waiting for a new observation.':monitor.enabled===false?'Node monitoring is off for this login. Enable monitoring through NATS above to request permitted node data.':'No node data was returned. This does not mean the cluster has no nodes. Check system service access, reply permissions and connectivity.') : 'No server monitoring observations.');
  else {
   const host=$('nodes-table'),key=JSON.stringify(nodes.map(n=>[n.slot,n.server_id,n.start]));
   if(host.dataset.rows!==key||!host.querySelector('table')){host.dataset.rows=key;host.replaceChildren(table([['Node'],['CPU',true],['Resident RAM',true],['Connections',true],['Subscriptions',true],['Slow detections (total)',true],['Coverage']],nodes.map(()=>[cell(),cell(),cell(),cell(),cell(),cell(null,true),cell()])));}

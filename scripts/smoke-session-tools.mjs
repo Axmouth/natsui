@@ -19,7 +19,7 @@ try {
   const [natsPort,httpPort,monitorPort]=await Promise.all([port(),port(),port()]);
   const base=`http://127.0.0.1:${httpPort}`;
   const config=join(directory,'nats.json');
-  writeFileSync(config,JSON.stringify({host:'127.0.0.1',port:natsPort,http_port:monitorPort,server_name:'browser-node',system_account:'SYS',jetstream:{store_dir:join(directory,'js')},accounts:{SYS:{users:[{user:'system',password:'secret'}]},APP:{jetstream:'enabled',users:[{user:'writer',password:'secret'}]}}}));
+  writeFileSync(config,JSON.stringify({host:'127.0.0.1',port:natsPort,http_port:monitorPort,server_name:'browser-node',system_account:'SYS',jetstream:{store_dir:join(directory,'js')},accounts:{SYS:{users:[{user:'system',password:'secret'}],exports:[{service:'$SYS.REQ.SERVER.PING.VARZ',accounts:['OPS'],response_type:'stream'}]},OPS:{jetstream:'enabled',users:[{user:'observer',password:'secret',permissions:{publish:{allow:['$JS.API.STREAM.LIST','$SYS.REQ.SERVER.PING.VARZ']},subscribe:{allow:['_INBOX.>']}}}],imports:[{service:{account:'SYS',subject:'$SYS.REQ.SERVER.PING.VARZ'}}]},APP:{jetstream:'enabled',users:[{user:'writer',password:'secret'}]}}}));
   launch(process.env.NATSUI_TEST_SERVER,['-c',config],process.env);
   await ready(`http://127.0.0.1:${monitorPort}/varz`);
   const env=Object.fromEntries(Object.entries(process.env).filter(([name])=>!name.startsWith('NATSUI_')));
@@ -30,6 +30,28 @@ try {
   const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
   async function login(user){await page.goto(base);await page.locator('#nats-username').fill(user);await page.locator('#nats-password').fill('secret');await page.getByRole('button',{name:'Sign in with NATS',exact:true}).click();await page.waitForURL(base+'/');await page.waitForFunction(()=>data?.dashboard?.session_history);}
   await login('writer');
+  await page.goto(base+'/#nodes');
+  await page.getByRole('button',{name:'Enable monitoring through NATS',exact:true}).waitFor();
+  assert.match(await page.locator('#nodes-table').textContent(),/monitoring is off/);
+  let releaseSnapshot,heldSnapshot;
+  const released=new Promise(r=>releaseSnapshot=r),held=new Promise(r=>heldSnapshot=r);let hold=true;
+  const intercept=async route=>{if(!hold)return route.continue();hold=false;const response=await route.fetch();heldSnapshot();await released;await route.fulfill({response});};
+  await page.route('**/api/snapshot',intercept);
+  await page.evaluate(()=>{void refresh();});await held;
+  await page.getByRole('button',{name:'Enable monitoring through NATS',exact:true}).click();
+  await page.getByRole('button',{name:'Stop NATS monitoring',exact:true}).waitFor();
+  releaseSnapshot();
+  await page.waitForFunction(()=>document.getElementById('session-monitoring-status').textContent.includes('Waiting for a NATS system-service reply')||document.getElementById('session-monitoring-status').textContent.includes('No usable NATS monitoring reply'));
+  assert.equal(await page.getByRole('button',{name:'Stop NATS monitoring',exact:true}).count(),1,'Old snapshot must not reverse a confirmed toggle');
+  await page.unroute('**/api/snapshot',intercept);
+  await page.waitForFunction(()=>document.getElementById('session-monitoring-status').textContent.includes('No usable NATS monitoring reply'));
+  assert.match(await page.locator('#nodes-table').textContent(),/does not mean the cluster has no nodes/);
+  mkdirSync(resolve('data/browser-check'),{recursive:true});await page.screenshot({path:resolve('data/browser-check/session-monitoring-unavailable.png'),fullPage:true});
+  await page.reload();
+  await page.waitForFunction(()=>document.getElementById('session-monitoring-status').textContent.includes('No usable NATS monitoring reply'));
+  await page.getByRole('button',{name:'Stop NATS monitoring',exact:true}).click();
+  await page.waitForFunction(()=>document.getElementById('nodes-table').textContent.includes('monitoring is off'));
+
   async function operation(action,fields={}){
     await page.goto(base+'/#operations');await page.locator('#operation-action').selectOption(action);
     await page.locator('#operation-stream').fill('JOBS');
@@ -66,6 +88,11 @@ try {
   }
   await page.locator('#sign-out').click();await page.waitForURL(base+'/login');
   await page.setViewportSize({width:1440,height:1000});
+  await login('observer');await page.goto(base+'/#nodes');
+  await page.getByRole('button',{name:'Enable monitoring through NATS',exact:true}).click();
+  await page.waitForFunction(()=>data?.monitoring?.nodes?.some(n=>n.server_name==='browser-node'));
+  assert.equal(await page.evaluate(()=>data.snapshot.status),'complete');
+  await page.locator('#sign-out').click();await page.waitForURL(base+'/login');
   await login('system');await page.goto(base+'/#nodes');
   await page.getByRole('button',{name:'Enable monitoring through NATS',exact:true}).click();
   await page.waitForFunction(()=>data?.monitoring?.nodes?.some(n=>n.server_name==='browser-node'));

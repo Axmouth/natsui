@@ -311,11 +311,8 @@ pub async fn dispatch(mut app: App, session: Arc<Session>, request: Request) -> 
         Ok(client) => client,
         Err(_) => return (StatusCode::BAD_GATEWAY, "NATS authentication or connectivity is unavailable. No collector credentials were used.").into_response(),
     };
-    let session_monitoring = policy.session_only
-        && session
-            .tools
-            .monitoring
-            .load(std::sync::atomic::Ordering::Relaxed);
+    let monitoring_choice = *session.tools.monitoring.lock().await;
+    let session_monitoring = policy.session_only && monitoring_choice.enabled;
     if policy.session_only
         && (path.starts_with("/api/monitoring/") || path.starts_with("/api/nodes/"))
     {
@@ -397,11 +394,16 @@ pub async fn dispatch(mut app: App, session: Arc<Session>, request: Request) -> 
             &app.scope,
         )
     };
-    let monitoring = if session_monitoring && path == "/api/snapshot" {
+    let mut monitoring = if session_monitoring && path == "/api/snapshot" {
         crate::native_tools::observe(&client, &session.tools).await
+    } else if policy.session_only {
+        json!({"status":"restricted","source":"session_nats","enabled":session_monitoring,"nodes":[],"detail":"Session NATS monitoring is disabled. Enable monitoring through NATS on the Nodes page."})
     } else {
-        json!({"status":"restricted","nodes":[],"detail":"Session NATS monitoring is disabled."})
+        json!({"status":"restricted","nodes":[],"detail":"Collector monitoring is not shared with this login."})
     };
+    if policy.session_only {
+        monitoring["revision"] = json!(monitoring_choice.revision);
+    }
     if let Some(observations) = &session.observations {
         app.db = observations.db.clone();
         app.settings_cache = Arc::new(RwLock::new(crate::store::Settings::default()));

@@ -65,6 +65,8 @@ docker compose --env-file .env -f compose.nats-login.yaml exec -T dashboard nats
 
 Include the TLS overlay when used. Local checks do not connect to NATS. The [deployment checker guide](DOCTOR.md) covers checks before startup, explicit password and certificate probes, capability guidance and Ansible output.
 
+For browser HTTPS without a proxy, follow the [native HTTPS recipe](HTTPS.md). It adds separate dashboard certificate mounts and preserves the NATS connection settings above.
+
 ## 4. Sign in and check live data
 
 Open http://127.0.0.1:4321, select the configured cluster, and enter an existing NATS username and password. No separate dashboard key is needed for this flow.

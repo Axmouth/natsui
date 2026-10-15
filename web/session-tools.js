@@ -8,12 +8,15 @@
   const certPanel=element('section',null,'panel inspector session-insights');certPanel.hidden=true;$('page-settings').prepend(certPanel);
   const monitoring=element('section',null,'panel inspector session-insights');monitoring.hidden=true;
   const monitorButton=element('button','Enable monitoring through NATS','quiet'),monitorNote=element('p');
-  monitoring.append(element('h2','Session node monitoring'),element('p','Uses this NATS identity to request node metrics and inventories. Requires system service access or configured service imports. No HTTP collector fallback.'),monitorButton,monitorNote);$('page-nodes').prepend(monitoring);
+  monitorNote.id='session-monitoring-status';monitorNote.setAttribute('role','status');
+  const monitorHelp=element('details'),monitorHelpText=element('p','Stream access does not grant system monitoring access. Node metrics request $SYS.REQ.SERVER.PING.VARZ and reply inbox subscriptions (_INBOX.>). An application account also needs the corresponding system-service exports/imports. Missing replies can mean permissions, service routing or connectivity. HTTP monitoring URLs are not used in session-only mode.');
+  monitorHelp.append(element('summary','Why can streams work while Nodes is empty?'),monitorHelpText);
+  monitoring.append(element('h2','Session node monitoring'),element('p','Uses this NATS identity to request node metrics and inventories. Requires system service access or configured service imports. No HTTP collector fallback.'),monitorButton,monitorNote,monitorHelp);$('page-nodes').prepend(monitoring);
   const watchPanel=element('section',null,'panel inspector session-insights'),watchSelect=element('select'),watchButton=element('button','Start failure watch','quiet'),watchStatus=element('p'),watchEvents=element('div');
   watchSelect.setAttribute('aria-label','Stream to watch');watchSelect.id='failure-watch-stream';watchButton.id='failure-watch-start';watchStatus.id='failure-watch-status';
   const controls=element('div',null,'record-controls');controls.append(watchSelect,watchButton);
   watchPanel.append(element('h2','Failure events'),element('p','Watches max-delivery and terminated-message advisories in bounded eight-second windows. Events outside those windows are missed. Silence does not verify subscription permission. This is not a DLQ.'),controls,watchStatus,watchEvents);$('page-activity').prepend(watchPanel);
-  let sessionInfo=null, sessionLoading=false, watchActive=false, watchAbort=null, watchTimer=null, watchToken=0;
+  let sessionInfo=null, sessionLoading=false, monitorBusy=false, watchActive=false, watchAbort=null, watchTimer=null, watchToken=0;
   const post=(path,body)=>api(path,{method:'POST',headers:{'Content-Type':'application/json','X-Natsui-Request':'1'},body:JSON.stringify(body)});
   function stopWatch() {
     watchActive=false;watchToken++;clearTimeout(watchTimer);watchAbort?.abort();watchAbort=null;watchButton.textContent='Start failure watch';watchSelect.disabled=false;
@@ -44,7 +47,7 @@
   window.addEventListener('hashchange',()=>{if(currentPage()!=='activity')stopWatch();});
   document.addEventListener('visibilitychange',()=>{if(document.hidden)stopWatch();});
   window.addEventListener('pagehide',stopWatch);
-  monitorButton.onclick=async()=>{monitorButton.disabled=true;try{const result=await post('/api/session/monitoring',{enabled:!sessionInfo?.monitoring});sessionInfo.monitoring=result.enabled;monitorNote.textContent=result.enabled?'Querying permitted NATS system services. Responders do not prove full cluster coverage.':'Monitoring stopped. Earlier session observations remain in history.';refresh();}catch(error){monitorNote.textContent=error.message;}finally{monitorButton.disabled=false;}};
+  monitorButton.onclick=async()=>{monitorBusy=true;monitorButton.disabled=true;try{const result=await post('/api/session/monitoring',{enabled:!sessionInfo?.monitoring});if(result.revision>=sessionInfo.monitoring_revision){sessionInfo.monitoring=result.enabled;sessionInfo.monitoring_revision=result.revision;}renderTools();monitorNote.textContent=result.enabled?'Querying permitted NATS system services. Responders do not prove full cluster coverage.':'Monitoring stopped. Earlier session observations remain in history.';refresh();}catch(error){monitorNote.textContent=error.message;}finally{monitorBusy=false;monitorButton.disabled=false;}};
   async function loadSession(){
     if(sessionLoading||sessionInfo||data?.dashboard?.login_method!=='nats')return;
     sessionLoading=true;try{sessionInfo=await api('/api/session');renderTools();}catch{}finally{sessionLoading=false;}
@@ -62,13 +65,18 @@
     const sessionOnly=!!data.dashboard?.session_history;
     watchPanel.hidden=staticDemo || (data.dashboard?.login_method==='nats'&&!sessionOnly);
     if(!watchActive){const selected=watchSelect.value;watchSelect.replaceChildren(...snapshot.streams.map(stream=>{const option=element('option',stream.config.name);option.value=stream.config.name;return option;}));if([...watchSelect.options].some(o=>o.value===selected))watchSelect.value=selected;watchButton.disabled=!watchSelect.options.length;}
-    monitoring.hidden=!sessionOnly;monitorButton.textContent=sessionInfo?.monitoring?'Stop NATS monitoring':'Enable monitoring through NATS';
+    monitoring.hidden=!sessionOnly;
+    if(sessionOnly&&data.monitoring?.source==='session_nats'&&sessionInfo&&data.monitoring.revision>=sessionInfo.monitoring_revision){sessionInfo.monitoring=data.monitoring.enabled;sessionInfo.monitoring_revision=data.monitoring.revision;}
+    monitorButton.disabled=!sessionInfo||monitorBusy;
+    monitorButton.textContent=sessionInfo?.monitoring?'Stop NATS monitoring':'Enable monitoring through NATS';
+    if(sessionOnly){const monitor=monitoringView(data.monitoring);monitorNote.textContent=!sessionInfo?'Loading monitoring controls...':!sessionInfo.monitoring?'Off for this login. Enabling monitoring only requests data allowed by this NATS identity.':monitor?.status==='unavailable'?'No usable NATS monitoring reply. Open the access explanation below. A successful stream query does not establish system access.':monitor?.nodes?.length?`${monitor.nodes.length} responding nodes. Total cluster size is unknown.`:'Waiting for a NATS system-service reply...';}
     if(sessionOnly&&currentPage()==='activity')$('page-description').textContent='Actions and observed changes from this login only. Discarded when the session ends.';
     loadSession();
     const cert=sessionInfo?.certificate;certPanel.hidden=!cert;
     if(cert){const remaining=cert.expires_at-Date.now()/1000;certPanel.replaceChildren(element('h2','Session certificate'),element('p',`Subject: ${cert.subject}`),element('p',`Issuer: ${cert.issuer}`),element('p',`Valid from ${new Date(cert.not_before*1000).toLocaleString()} until ${new Date(cert.expires_at*1000).toLocaleString()}`),element('p',`SHA-256: ${cert.fingerprint}`,'json'),element('p',remaining<=0?'Certificate has expired':`Expires in ${age(remaining)}`,remaining<30*86400?'issue':'panel-note'));
       if(remaining<30*86400){const attention=element('div',remaining<=0?'The session certificate has expired.':'The session certificate expires in '+age(remaining)+'.','issue');$('collection-issues').append(attention);}}
   }
+  globalThis.sessionMonitoringChoice=()=>sessionInfo?{enabled:sessionInfo.monitoring,revision:sessionInfo.monitoring_revision}:null;
   globalThis.renderSessionTools=renderTools;
   renderTools();
 })();

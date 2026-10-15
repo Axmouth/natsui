@@ -1,0 +1,21 @@
+services:
+  dashboard:
+    ports: !override
+      - "${NATSUI_HTTPS_BIND:-127.0.0.1}:${NATSUI_HTTPS_PORT:-8443}:4321"
+    environment:
+      NATSUI_PUBLIC_URL: ${NATSUI_PUBLIC_URL:?Set the dashboard HTTPS browser origin}
+      NATSUI_HTTPS_CERT: /run/dashboard-tls/server.crt
+      NATSUI_HTTPS_KEY: /run/dashboard-tls/server.key
+    volumes:
+      - type: bind
+        source: ./local-secrets/dashboard.crt
+        target: /run/dashboard-tls/server.crt
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./local-secrets/dashboard.key
+        target: /run/dashboard-tls/server.key
+        read_only: true
+        bind:
+          create_host_path: false

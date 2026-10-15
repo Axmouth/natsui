@@ -62,3 +62,11 @@ Real-broker and browser regressions cover the corrected paths. The reviewer insp
 An independent read-only review inspected the new CLI, shared validators, profile extraction and real-broker test script. Corrected findings included omitted connection validation for additional profiles, dependent TLS parsing after a failed file-size check, unvalidated collector HTTP monitoring conflicts and overly permissive response-shape checks.
 
 Startup and diagnostics share login policy, connection validation, profile definitions, monitoring construction and deployment-setting parsers. Diagnostic reporting and explicit read probes remain separate from normal collection. Controlled validation errors can identify the failing setting, while external errors and response payloads remain excluded from reports. The reviewer did not run tests independently. Local regression evidence is recorded in VERIFICATION.md.
+
+## Native HTTPS and monitoring review, 2026-10-15
+
+An independent read-only review covered native TLS termination, bounded concurrent handshakes, local CLI destinations, certificate verification, origin/cookie handling and session monitoring controls. Corrections addressed bracketed IPv6 public names and stale snapshots overwriting confirmed monitoring choices. The follow-up review found no remaining blockers in that scope.
+
+The HTTPS listener uses the existing Rustls stack and Axum listener interface. Health and login commands share a bounded HTTP client that connects only to IPv4 loopback while verifying the configured public DNS name or IP certificate identity. Public DNS and redirects cannot redirect CLI credentials. TLS certificate reload and issuance remain deployment responsibilities.
+
+Monitoring choices use a short-held mutex and revision counter. Snapshots retain the revision captured before collection, so delayed results cannot reverse a newer choice. The browser regression delays a real snapshot across Enable and verifies the confirmed state. Review was source-only. Executed tests are recorded in VERIFICATION.md.

@@ -1,0 +1,11 @@
+services:
+  dashboard:
+    environment:
+      NATSUI_HTTPS_CA: /run/dashboard-tls/ca.crt
+    volumes:
+      - type: bind
+        source: ./local-secrets/dashboard-ca.crt
+        target: /run/dashboard-tls/ca.crt
+        read_only: true
+        bind:
+          create_host_path: false

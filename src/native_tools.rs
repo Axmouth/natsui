@@ -7,18 +7,18 @@ use axum::{
 use futures_util::StreamExt;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::{
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
-    time::Duration,
-};
+use std::{sync::Arc, time::Duration};
 use tokio::sync::{Mutex, Semaphore};
+
+#[derive(Clone, Copy, Default)]
+pub struct MonitoringState {
+    pub enabled: bool,
+    pub revision: u64,
+}
 
 pub struct SessionTools {
     pub db: crate::store::Database,
-    pub monitoring: AtomicBool,
+    pub monitoring: Mutex<MonitoringState>,
     pub servers: Mutex<Vec<String>>,
     pub watch: Semaphore,
     pub certificate: Option<Value>,
@@ -27,7 +27,7 @@ impl SessionTools {
     pub fn new(certificate: Option<Value>) -> Result<Self, String> {
         Ok(Self {
             db: crate::store::Database::session().map_err(|_| "Session storage unavailable")?,
-            monitoring: AtomicBool::new(false),
+            monitoring: Mutex::new(MonitoringState::default()),
             servers: Mutex::new(vec![]),
             watch: Semaphore::new(1),
             certificate,
@@ -42,8 +42,9 @@ fn upstream() -> Error {
 pub async fn session_info(
     Extension(session): Extension<Arc<crate::nats_login::Session>>,
 ) -> Json<Value> {
+    let state = *session.tools.monitoring.lock().await;
     Json(
-        json!({"certificate":session.tools.certificate,"monitoring":session.tools.monitoring.load(Ordering::Relaxed)}),
+        json!({"certificate":session.tools.certificate,"monitoring":state.enabled,"monitoring_revision":state.revision}),
     )
 }
 #[derive(Deserialize)]
@@ -62,11 +63,12 @@ pub async fn set_monitoring(
             "Session monitoring requires session-only mode".into(),
         ));
     }
-    session
-        .tools
-        .monitoring
-        .store(choice.enabled, Ordering::Relaxed);
-    Ok(Json(json!({"enabled":choice.enabled})))
+    let mut state = session.tools.monitoring.lock().await;
+    state.enabled = choice.enabled;
+    state.revision += 1;
+    Ok(Json(
+        json!({"enabled":state.enabled,"revision":state.revision}),
+    ))
 }
 
 // One bounded request gathers replies from the servers that the NATS identity can reach.
@@ -112,7 +114,7 @@ async fn replies(
 }
 pub async fn observe(client: &async_nats::Client, tools: &SessionTools) -> Value {
     let Ok(values) = replies(client, "$SYS.REQ.SERVER.PING.VARZ".into(), json!({})).await else {
-        return json!({"status":"unavailable","source":"session_nats","nodes":[],"detail":upstream().1});
+        return json!({"status":"unavailable","source":"session_nats","enabled":true,"nodes":[],"detail":upstream().1});
     };
     let mut slots = tools.servers.lock().await;
     let mut nodes = vec![];
@@ -132,7 +134,7 @@ pub async fn observe(client: &async_nats::Client, tools: &SessionTools) -> Value
             ));
         }
     }
-    json!({"status":"partial","source":"session_nats","nodes":nodes,"detail":"NATS responders only. Total cluster size and silent servers are unknown. Up to 32 replies and 4 MB per request. This session tracks at most 32 distinct server identities."})
+    json!({"status":"partial","source":"session_nats","enabled":true,"nodes":nodes,"detail":"NATS responders only. Total cluster size and silent servers are unknown. Up to 32 replies and 4 MB per request. This session tracks at most 32 distinct server identities."})
 }
 pub async fn inventory(
     client: &async_nats::Client,

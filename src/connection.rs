@@ -9,7 +9,7 @@ use std::{path::PathBuf, time::Duration};
 
 // Certificate extensions are ambiguous. PEM bundles and single DER certificates
 // use the same validation path for mounted trust, mounted identity and browser uploads.
-fn certificates(bytes: &[u8]) -> Result<Vec<CertificateDer<'static>>, String> {
+pub(crate) fn certificates(bytes: &[u8]) -> Result<Vec<CertificateDer<'static>>, String> {
     if bytes.is_empty() {
         return Err("A certificate is required".into());
     }

@@ -751,21 +751,16 @@ pub async fn login_link(port: u16) -> Result<(), Box<dyn std::error::Error>> {
         .take(513)
         .read_to_string(&mut key)?;
     let address = format!("http://127.0.0.1:{port}");
-    let client = reqwest::Client::builder()
-        .no_proxy()
-        .redirect(reqwest::redirect::Policy::none())
-        .timeout(Duration::from_secs(5))
-        .build()?;
-    let response = client
-        .post(format!("{address}/api/auth/ticket"))
-        .header("x-natsui-request", "1")
-        .json(&serde_json::json!({"key":key.trim()}))
-        .send()
-        .await?;
-    if !response.status().is_success() {
-        return Err(format!("Login link unavailable (HTTP {})", response.status()).into());
+    let (status, bytes) = crate::https::local_request(
+        port,
+        "/api/auth/ticket",
+        Some(serde_json::json!({"key":key.trim()})),
+    )
+    .await?;
+    if !status.is_success() {
+        return Err(format!("Login link unavailable (HTTP {status})").into());
     }
-    let value: serde_json::Value = response.json().await?;
+    let value: serde_json::Value = serde_json::from_slice(&bytes)?;
     let token = value["token"]
         .as_str()
         .filter(|t| t.len() == 64 && t.bytes().all(|b| b.is_ascii_hexdigit()))

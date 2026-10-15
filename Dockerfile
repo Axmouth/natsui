@@ -17,6 +17,7 @@ COPY demo/README.md demo/published.yaml ./demo/
 COPY compose.yaml ./compose.yaml
 RUN --mount=type=cache,target=/usr/local/cargo/registry --mount=type=cache,target=/app/target \
     NATSUI_TLS_FIXTURES="$(node scripts/tls-fixtures.mjs)" NATSUI_TEST_SERVER=/usr/local/bin/nats-server cargo test --locked -- --include-ignored \
+    && NATSUI_TLS_FIXTURES="$(node scripts/tls-fixtures.mjs)" NATSUI_TEST_SERVER=/usr/local/bin/nats-server node scripts/smoke-https.mjs /app/natsui \
     && NATSUI_TLS_FIXTURES="$(node scripts/tls-fixtures.mjs)" NATSUI_TEST_SERVER=/usr/local/bin/nats-server node scripts/test-doctor.mjs /app/natsui \
     && node scripts/test-ui-contract.mjs && node scripts/smoke-monitor-security.mjs /app/natsui \
     && node scripts/smoke-oidc.mjs /app/natsui && node scripts/smoke-workspace.mjs /app/natsui \
@@ -36,5 +37,5 @@ USER 10001:10001
 ENV NATSUI_CONTAINER=1 NATSUI_DATA_DIR=/data
 EXPOSE 4321
 HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=3 \
-    CMD curl -fsS http://127.0.0.1:4321/healthz || exit 1
+    CMD ["natsui", "healthcheck"]
 ENTRYPOINT ["natsui"]

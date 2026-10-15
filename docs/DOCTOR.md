@@ -105,6 +105,10 @@ docker compose --env-file .env -f compose.nats-login.yaml -f compose.tls.yaml -f
 
 Certificates accept PEM, PEM bundles or a single DER certificate, including .crt files. Private keys must be matching, unencrypted PEM. These probe mounts must not be assigned to NATSUI_TLS_CERT or NATSUI_TLS_KEY in session-only mode. The probe cannot inspect server configuration to prove verify_and_map is enabled. Successful authentication alone does not establish individual certificate mapping or sufficient API permissions.
 
+## Check native HTTPS
+
+The [native HTTPS recipe](HTTPS.md) serves the dashboard without a proxy. doctor checks paired dashboard certificate/key files, the public HTTPS origin and CA material. After startup, natsui healthcheck additionally verifies the running listener using the configured hostname and trust. Broker TLS uses separate NATSUI_TLS_* settings.
+
 ## Read the results
 
 A local check can report these lines together:
@@ -121,7 +125,7 @@ That is expected. The configuration is suitable for session-only mode, but no us
 | login.policy fails with a shared-history conflict | Keep NATSUI_NATS_LOGIN=1 and NATSUI_NATS_LOGIN_SESSION_ONLY=1. Set both NATSUI_NATS_LOGIN_SHARED_HISTORY and NATSUI_NATS_LOGIN_SHARED_MONITORING to 0, then recreate the service. |
 | profile.default.connection names an unreadable NATSUI_TLS_CA | Check that local-secrets/ca.pem exists, include compose.tls.yaml and make the mounted file readable by UID/GID 10001. |
 | probe.authentication passes but probe.stream_list is unknown | The login worked. Check the account, JetStream availability/domain, API publish permission and reply-inbox subscription. A timeout alone does not identify the cause. |
-| probe.stream_list passes but probe.system_monitoring is unknown | Stream access works. System visibility is separate and often intentionally unavailable to application users. Grant system access only when node monitoring is intended. |
+| probe.stream_list passes but probe.system_monitoring is unknown | Stream access works. System visibility is separate and often intentionally unavailable to application users. Check both account routing and user grants as explained in [JetStream versus node access](NATS_LOGIN.md#why-jetstream-access-does-not-imply-node-access). Grant system access only when node monitoring is intended. |
 | profile.default.operations is disabled | The dashboard's write switch is off. For reviewed edits, set NATSUI_ALLOW_WRITES=1 and separately grant only the required NATS operations. Doctor does not test writes. |
 | storage.persistence is unknown | The command did not test volume durability or SQLite writes. Follow the setup guide's storage and readiness checks. |
 

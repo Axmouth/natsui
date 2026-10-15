@@ -2,7 +2,7 @@
 
 A local NATS and JetStream observability dashboard with read-only access by default with inspectable history, consumer diagnostics and incident investigation. Rust serves the bundled interface; SQLite stores local settings and operational history. No Node runtime or external database is needed to run the native binary.
 
-The local beta has no shared login or public HTTP access policy. Production NATS connections require a restricted NATS identity. The dashboard never pulls or acknowledges application messages.
+Dashboard authentication supports NATS sign-in, dashboard identities and configured SSO. Shared access requires an explicit HTTPS origin, served through native HTTPS or a trusted proxy. Production NATS connections require a restricted NATS identity. The dashboard never pulls or acknowledges application messages.
 
 ## Try a real cluster
 
@@ -85,7 +85,10 @@ The binary is in `target/release`. The optional packaging script produces a plat
 | NATSUI_PROFILE | Local NATS | Profile label and history namespace |
 | NATSUI_DOMAIN | Unset | JetStream API domain |
 | NATSUI_MONITOR_URLS | Unset | Comma-separated native monitoring origins, at most 32 |
-| NATSUI_PORT | 4321 | Dashboard HTTP port |
+| NATSUI_PORT | 4321 | Dashboard HTTP or native HTTPS listener port |
+| NATSUI_PUBLIC_URL | Unset | Exact HTTPS browser origin for authenticated shared access |
+| NATSUI_HTTPS_CERT / NATSUI_HTTPS_KEY | Unset | Dashboard server certificate and matching unencrypted PEM key, enables native HTTPS |
+| NATSUI_HTTPS_CA | System trust | Private CA for verified local HTTPS health checks and login links |
 | NATSUI_DATA_DIR | data (image: /data) | Persistent SQLite directory; mount the entire directory |
 | NATSUI_AUTH_TOKEN_FILE | Unset | Generated dashboard access-key file; enables session authentication |
 | NATSUI_ALLOW_WRITES | 0 | Opt-in reviewed JetStream updates, subject to broker permissions |

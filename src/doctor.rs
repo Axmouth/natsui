@@ -203,13 +203,21 @@ pub async fn run(args: &[String]) -> i32 {
     let auth=report.validation("dashboard.authentication",auth::Auth::from_env(),"Dashboard authentication settings parsed.","Dashboard authentication configuration could not be loaded.","Correct the login policy or mount NATSUI_AUTH_TOKEN_FILE as a readable file containing the generated 64-character key. Session-only NATS sign-in needs no dashboard key.");
     if let Some(auth) = &auth {
         if let Ok(origin) = std::env::var("NATSUI_PUBLIC_URL") {
-            report.validation("dashboard.https",auth.configure_origin(&origin),"HTTPS public-origin configuration is valid. Proxy routing and browser TLS remain untested.","Public-origin configuration is invalid.","Set NATSUI_PUBLIC_URL to an HTTPS origin without a path, query or credentials, and enable dashboard or NATS authentication.");
+            report.validation("dashboard.https",auth.configure_origin(&origin),"HTTPS public-origin configuration is valid. External routing and browser trust remain untested.","Public-origin configuration is invalid.","Set NATSUI_PUBLIC_URL to an HTTPS origin without a path, query or credentials, and enable dashboard or NATS authentication.");
         } else {
-            report.add("dashboard.https","warning","No public HTTPS origin is configured. This does not establish how container ports are exposed.","For shared access, terminate HTTPS at the trusted proxy and set NATSUI_PUBLIC_URL to its HTTPS origin. For local use, publish only to 127.0.0.1. Browser HTTPS and NATS TLS are separate.");
+            report.add("dashboard.https","warning","No public HTTPS origin is configured. This does not establish how container ports are exposed.","For shared access, configure native HTTPS or a trusted HTTPS proxy and set NATSUI_PUBLIC_URL to the browser-facing HTTPS origin. For local use, publish only to 127.0.0.1. Browser HTTPS and NATS TLS are separate.");
         }
         if let Some(path) = std::env::var_os("NATSUI_ACCESS_POLICY_FILE") {
             report.validation("dashboard.profile_policy",file(Path::new(&path),65536).and_then(|bytes|auth.configure_policy(&bytes).map_err(|_|())),"Dashboard profile policy parsed. It does not grant NATS permissions.","Dashboard profile policy is unreadable or invalid.","Mount valid NATSUI_ACCESS_POLICY_FILE JSON readably. Its allowlists apply to dashboard identities, not NATS accounts.");
         }
+    }
+    match report.configuration("dashboard.native_https", crate::https::Configuration::from_env(),
+        "Native HTTPS configuration parsed. Certificate hostname, expiry and trust require a live connection check.",
+        "Native HTTPS configuration is invalid.",
+        "Set NATSUI_HTTPS_CERT and NATSUI_HTTPS_KEY together with authenticated access and NATSUI_PUBLIC_URL. Mount NATSUI_HTTPS_CA for private-CA health checks and login links. These are separate from NATSUI_TLS_* broker settings.") {
+        Some(None) => report.add("dashboard.transport", "disabled", "Native HTTPS is disabled.", "For direct HTTPS, configure the dashboard certificate and key. A configured public HTTPS origin alone selects the existing reverse-proxy setup."),
+        Some(Some(_)) => report.add("dashboard.transport", "pass", "The dashboard is configured to serve HTTPS directly.", "Run natsui healthcheck against the running service to verify its certificate and local endpoint. Browser trust and external routing need separate verification."),
+        None => (),
     }
     let writes = report
         .validation(

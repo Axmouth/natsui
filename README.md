@@ -59,6 +59,16 @@ The start command resumes it. Adding `-v` to the stop command deletes this demo'
 
 [Download the standalone Compose file](https://axmouth.github.io/natsui/try/compose.yaml) for Compose 2.23.1+ and run `docker compose -f compose.yaml up -d --wait`. [Demo setup and lifecycle](demo/README.md) covers source builds, workload phases, ports and cleanup.
 
+## Pin a release
+
+The `v0.1.0` image supports Linux AMD64 and ARM64:
+
+```sh
+docker pull ghcr.io/axmouth/natsui:v0.1.0
+```
+
+Replace `ghcr.io/axmouth/natsui:latest` in deployment commands or Compose files with this version to avoid automatic version changes on image pulls. `latest` and `main` follow verified updates. Release tags are not reused by the publishing workflow. Digest references provide an exact content pin. [Release policy and publishing](docs/RELEASES.md) covers version tags, digest pins and the separate demo bundle.
+
 ## Connect an existing NATS server
 
 The recommended setup uses existing NATS sign-in and private session history, with no collector account. The [step-by-step setup guide](docs/SETUP.md) covers network discovery, TLS and certificate sign-in. For an existing password-authenticated NATS service on a trusted private Docker network:
@@ -95,6 +105,8 @@ The binary serves its own UI. Session observations stay in memory until sign-out
 Use a NATS identity with the intended observation permissions. Session-only deployments do not mount collector credentials. [Security and permissions](SECURITY.md) includes the permission template, credentials-file setup, private CA and mutual TLS options. `NATSUI_URL` also accepts comma-separated server addresses for the same cluster/account. Session-only mode connects on sign-in and on subsequent requests using the first successful authenticated seed. Optional session node monitoring uses NATS system services. The alternative background collector retains seeds for reconnects and uses separate `NATSUI_MONITOR_URLS` HTTP endpoints.
 
 [Full configuration, storage limits and troubleshooting context](docs/OPERATIONS.md)
+
+[Native HTTPS](docs/HTTPS.md) serves the dashboard directly with a mounted server certificate and key, without a reverse proxy. Dashboard TLS and NATS TLS settings remain separate.
 
 ## Check the deployment
 

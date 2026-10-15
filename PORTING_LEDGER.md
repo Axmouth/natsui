@@ -354,3 +354,13 @@ NATS session-only sign-in is the recommended setup and the default in the dedica
 ## Diagnostic guide examples, 2026-10-05
 
 Added beyond Fibril: downloadable read-only password and certificate probe mounts, complete TLS and resource-check commands, symptom-based corrections and a guide task index. The README quick start and website now lead with NATS session-only sign-in and distinguish transient observations from persistent dashboard state. Existing monitoring troubleshooting now describes both session NATS requests and optional shared HTTP collection.
+
+## Native HTTPS and session monitoring feedback, 2026-10-15
+
+Added beyond Fibril: optional native dashboard TLS with mounted PEM/DER server certificates, bounded concurrent handshakes, explicit HTTPS origin and verified loopback health/login CLI connections. Browser and NATS TLS remain separate. Direct TLS requires authentication and does not issue or reload certificates automatically. Deployment recipes cover private trust and separate host/listener ports.
+
+Session Nodes now distinguishes disabled monitoring from an enabled request with no usable reply. The page explains system-service access, reply subscriptions and account imports. Missing responses never imply an empty cluster or certain permission denial. No additional access is granted by the UI.
+
+## Fixed container releases
+
+Version tags promote verified multi-platform dashboard and traffic images. Publishing rejects replacement with a different digest and preserves moving `latest` and `main` tags for ongoing updates. This is a new distribution capability rather than a Fibril UI port. Exact content pins use registry digests. Guard tests cover version mismatches, missing architectures and registry failures. Container execution remains a CI check when no local Docker Engine is available.

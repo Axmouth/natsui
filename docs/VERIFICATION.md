@@ -86,3 +86,13 @@ The existing desktop/mobile session browser regression passed against the new bi
 Docker Engine was unavailable, so the container image was not built or executed locally. Ansible examples were not deployed. These results do not establish remote CI completion, publication, volume durability or reverse-proxy correctness. Existing deployments were not restarted.
 
 Diagnostic guide follow-up: generated Pages links and section anchors passed with both downloadable probe overlays. Docker Compose configuration passed for password probes, password probes with private-CA TLS, and certificate probes with private-CA TLS. These were configuration checks only, without container execution.
+
+## Native HTTPS and session Nodes feedback, 2026-10-15
+
+All 61 Rust tests passed with Rust 1.94.0 and the disposable NATS 2.11.8 suite. Formatting, strict Clippy and the final debug build passed. The deployment doctor regression passed with the added native HTTPS validation.
+
+scripts/smoke-https.mjs passed against real native listeners. Coverage includes PEM and DER dashboard certificates and CA files, rejected mismatched keys, required authentication/public origin, private trust and hostname rejection, IPv6 public identity over fixed IPv4 loopback, different published/listener ports, Secure NATS cookies, Host/Origin rejection, slow-handshake isolation, plaintext refusal and existing HTTP proxy health/login compatibility. No application credentials appeared in process logs. The smoke test is wired into native and container verification.
+
+The browser regression reproduced enabled-but-empty Nodes with an application account lacking system-service access. A restricted application account with an explicit VARZ export/import received node metrics, as did a system-account identity. Disabled and unavailable states remain distinct after reload. A delayed real snapshot cannot reverse a newer confirmed monitoring choice. Existing consumer, activity, pause/resume and mobile checks passed. The unavailable-Nodes screenshot was inspected under data/browser-check/session-monitoring-unavailable.png.
+
+Generated Pages links, UI route contracts, static-demo invariants, JavaScript syntax and native HTTPS Compose configuration passed. The rendered recipe replaces the HTTP mapping with one loopback HTTPS host port and read-only certificate/key/CA mounts. Docker Engine was unavailable, so the image was not built or run locally. No existing deployment was changed and these results do not establish remote publication or the cause of a particular deployed cluster's missing system replies.
