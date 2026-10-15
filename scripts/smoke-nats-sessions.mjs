@@ -97,7 +97,7 @@ try {
   await page.setViewportSize({width:1280,height:900});
   await page.goto(base + '/#nodes');
   await page.getByRole('button',{name:'Enable monitoring through NATS',exact:true}).click();
-  await page.waitForFunction(() => data?.monitoring?.source==='session_nats');
+  await page.waitForFunction(() => data?.monitoring?.source==='session_nats' && data.monitoring.enabled===true && data.monitoring.revision===1);
   assert.equal(await page.evaluate(() => data.monitoring.status),'unavailable');
   assert.match(await page.locator('#monitor-coverage').textContent(), /0 NATS responders/);
   await page.getByRole('button',{name:'Stop NATS monitoring',exact:true}).click();
