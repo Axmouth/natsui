@@ -89,14 +89,14 @@ try {
   await page.locator('#sign-out').click();await page.waitForURL(base+'/login');
   await page.setViewportSize({width:1440,height:1000});
   await login('observer');await page.goto(base+'/#nodes');
-  await page.getByRole('button',{name:'Enable monitoring through NATS',exact:true}).click();
+  await page.getByRole('button',{name:'Stop NATS monitoring',exact:true}).waitFor();
   await page.waitForFunction(()=>data?.monitoring?.nodes?.some(n=>n.server_name==='browser-node'));
   assert.equal(await page.evaluate(()=>data.snapshot.status),'complete');
   await page.locator('#sign-out').click();await page.waitForURL(base+'/login');
   await login('system');await page.goto(base+'/#nodes');
-  await page.getByRole('button',{name:'Enable monitoring through NATS',exact:true}).click();
+  await page.getByRole('button',{name:'Stop NATS monitoring',exact:true}).waitFor();
   await page.waitForFunction(()=>data?.monitoring?.nodes?.some(n=>n.server_name==='browser-node'));
-  assert.match(await page.locator('#monitor-coverage').textContent(),/1 NATS responder/);
+  assert.match(await page.locator('#monitor-coverage').textContent(),/^1 (of 1 servers )?responding/);
   await page.screenshot({path:join(screenshots,'session-native-monitoring.png'),fullPage:true});
   await page.goto(base+'/#connections');
   await page.waitForFunction(()=>document.getElementById('connections-table')?.querySelector('tbody tr'));

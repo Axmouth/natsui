@@ -99,7 +99,7 @@ try {
   await page.getByRole('button',{name:'Enable monitoring through NATS',exact:true}).click();
   await page.waitForFunction(() => data?.monitoring?.source==='session_nats' && data.monitoring.enabled===true && data.monitoring.revision===1);
   assert.equal(await page.evaluate(() => data.monitoring.status),'unavailable');
-  assert.match(await page.locator('#monitor-coverage').textContent(), /0 NATS responders/);
+  assert.match(await page.locator('#monitor-coverage').textContent(), /^0 responding$/);
   await page.getByRole('button',{name:'Stop NATS monitoring',exact:true}).click();
   await page.goto(base + '/#activity');
   await page.getByRole('heading',{name:'Failure events',exact:true}).waitFor({state:'visible'});
