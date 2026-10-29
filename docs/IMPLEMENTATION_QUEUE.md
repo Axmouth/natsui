@@ -37,3 +37,15 @@ The 24-hour endurance recording started on 2026-09-14 at 17:04 UTC against a sep
 - [x] Adversarial review of the follow-up implementation.
 
 The follow-up ships through the existing main-branch verification gate. GitHub Actions records native runner results and image/Pages promotion for each commit. Local evidence is recorded in RELEASE_CHECKLIST.md.
+
+## Queued, 2026-10-29
+
+Scoped access, the capability overview and record management shipped in v0.2.0. The local sfdev mirror uses top-level users in the global account ($G), with one service identity that has stream listing but no $SYS.REQ.USER.INFO grant.
+
+- [ ] Fall back to `$JS.API.DIRECT.GET.<stream>` for record reads when STREAM.MSG.GET is not granted but direct get is, for streams with direct access enabled. Identities commonly grant direct get only.
+- [ ] Node metrics for global-account deployments. `$G` cannot import system services, so only a separate system-account user receives VARZ. Options: an opt-in VARZ-only HTTP source for session-only mode, or documenting the separate system login.
+- [ ] Reduce fallback noise when grants are unknown: avoid probing consumer inventories and node requests that repeat a denial already seen in the same session, and suggest the USER.INFO grant where unknown access causes partial views.
+- [ ] Subject management: add and remove captured subjects on a stream through the reviewed operation flow, gated by STREAM.UPDATE grants. Covers RabbitMQ-style binding changes.
+- [ ] Further management parity: stream configuration edits (limits, retention, replicas), consumer configuration edits and consumer creation options beyond durable pull, each gated by its grants.
+- [ ] Show the dashboard identity name for dashboard-key and OIDC sessions alongside the NATS username shown in the top bar.
+- [ ] Publish a sfdev permission template: per-system users with USER.INFO and VARZ, denied stream listing, and exact grants for requests without trailing tokens.

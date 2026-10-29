@@ -481,14 +481,15 @@ pub async fn dispatch(mut app: App, session: Arc<Session>, request: Request) -> 
     if response.status().is_success()
         && (path == "/api/snapshot" || path.starts_with("/api/history") || path == "/api/incidents")
     {
-        return scope_response(response, &path, policy).await;
+        return scope_response(response, &path, policy, &session.username).await;
     }
     response
 }
 
-fn scope_value(value: &mut Value, path: &str, policy: Policy) {
+fn scope_value(value: &mut Value, path: &str, policy: Policy, user: &str) {
     if path == "/api/snapshot" {
         value["dashboard"]["login_method"] = json!("nats");
+        value["dashboard"]["login_user"] = json!(user);
         value["dashboard"]["session_history"] = json!(policy.session_only);
         value["dashboard"]["shared_history"] = json!(policy.history);
         value["dashboard"]["shared_monitoring"] = json!(policy.monitoring);
@@ -519,7 +520,7 @@ fn scope_value(value: &mut Value, path: &str, policy: Policy) {
     }
 }
 
-async fn scope_response(response: Response, path: &str, policy: Policy) -> Response {
+async fn scope_response(response: Response, path: &str, policy: Policy, user: &str) -> Response {
     let (mut parts, body) = response.into_parts();
     let Ok(bytes) = axum::body::to_bytes(body, 24_000_000).await else {
         return StatusCode::BAD_GATEWAY.into_response();
@@ -527,7 +528,7 @@ async fn scope_response(response: Response, path: &str, policy: Policy) -> Respo
     let Ok(mut value) = serde_json::from_slice::<Value>(&bytes) else {
         return StatusCode::BAD_GATEWAY.into_response();
     };
-    scope_value(&mut value, path, policy);
+    scope_value(&mut value, path, policy, user);
     parts.headers.remove(axum::http::header::CONTENT_LENGTH);
     Response::from_parts(parts, axum::body::Body::from(value.to_string()))
 }
@@ -668,18 +669,18 @@ mod tests {
         };
         let row = json!({"summary":{"resources":{"streams":[{"name":"A"}],"monitoring":{"nodes":[{"server_name":"secret"}]}}}});
         let mut value = json!([row.clone()]);
-        scope_value(&mut value, "/api/history", policy);
+        scope_value(&mut value, "/api/history", policy, "reader");
         assert!(value[0]["summary"]["resources"].get("monitoring").is_none());
         assert_eq!(value[0]["summary"]["resources"]["streams"][0]["name"], "A");
         let mut value = json!({"samples":[row]});
-        scope_value(&mut value, "/api/history/window", policy);
+        scope_value(&mut value, "/api/history/window", policy, "reader");
         assert!(
             value["samples"][0]["summary"]["resources"]
                 .get("monitoring")
                 .is_none()
         );
         let mut value = json!([{"resource":"node"},{"resource":"stream"},{"resource":"unknown"}]);
-        scope_value(&mut value, "/api/incidents", policy);
+        scope_value(&mut value, "/api/incidents", policy, "reader");
         assert_eq!(value, json!([{"resource":"stream"}]));
     }
 }

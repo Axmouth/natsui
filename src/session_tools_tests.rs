@@ -652,6 +652,7 @@ async fn record_management_follows_grants() {
         "default",
     )
     .await;
+    assert_eq!(snapshot["dashboard"]["login_user"], "reader");
     let caps = &snapshot["snapshot"]["capabilities"];
     assert_eq!(caps["known"], true, "{snapshot}");
     let purge = caps["streams"][0]["capabilities"]

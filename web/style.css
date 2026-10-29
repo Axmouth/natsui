@@ -44,3 +44,4 @@ html[data-theme="light"] .flavor-item[data-flavor=""] .swatch{background:#ae5644
 .session-insights{margin-top:18px}.session-insights p{overflow-wrap:anywhere}.session-insights td{white-space:normal;min-width:120px;line-height:1.6}
 
 .resource-actions{display:flex;flex-wrap:wrap;gap:10px;margin:14px 0}.resource-actions:empty{display:none}#access-capabilities{margin-bottom:20px}#access-capabilities td{white-space:normal;line-height:1.7;vertical-align:top}#access-capabilities code{font:11px var(--mono);overflow-wrap:anywhere}#access-capabilities h3{font-size:12px;margin:22px 0 8px}
+.signed-in-user{font:11px var(--mono);color:var(--muted);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
