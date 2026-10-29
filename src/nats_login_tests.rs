@@ -133,7 +133,7 @@ async fn router_config(
         connection: Some(config),
         settings_cache: Arc::new(RwLock::new(store::Settings::default())),
     };
-    crate::profiles::router(app, dir.to_str().unwrap())
+    crate::profiles::router(app, Some(dir.to_str().unwrap()))
         .await
         .unwrap()
 }

@@ -28,7 +28,7 @@ Each login creates a private in-memory SQLite database. The existing history, ba
 
 Session history starts empty and disappears on logout, session replacement, eviction, expiry or process restart. Completed requests already in flight may finish. There is no collection while tabs are closed, no recovery of earlier session history, and no HTTP node monitoring. Data access still requires fresh NATS authentication, including historical reads. Broker outages therefore make session history unavailable until authentication succeeds again.
 
-History and incident payloads each have a 4 MiB rolling budget per session, with at most 32 authenticated dashboard sessions. Older records are pruned. These are serialized payload limits, not process RAM limits. The previous observation also has a 4 MiB serialized cache limit. Larger observations remain live but cannot establish an incident-comparison baseline. Samples within two seconds share one observation. Session operations also use the private activity store, so this mode does not provide a durable operation audit. Persistent /data remains useful for dashboard-owned settings and identities but contains no session observations or uploaded keys. Dashboard identities cannot fall back to collector data in this mode.
+History and incident payloads each have a 4 MiB rolling budget per session, with at most 32 authenticated dashboard sessions. Older records are pruned. These are serialized payload limits, not process RAM limits. The previous observation also has a 4 MiB serialized cache limit. Larger observations remain live but cannot establish an incident-comparison baseline. Samples within two seconds share one observation. Session operations also use the private activity store, so this mode does not provide a durable operation audit. Persistent /data remains useful for dashboard-owned settings and identities but contains no session observations or uploaded keys. It is optional in this mode: when the data directory is not writable, the dashboard starts with in-memory storage, logs that choice and reports `persistence: memory` in storage health. Settings and dashboard users then reset on restart. Dashboard identities cannot fall back to collector data in this mode.
 
 The /readyz endpoint reports collection as on_sign_in and checks dashboard storage. A successful readiness response means the sign-in service is ready, not that any broker or user permissions were tested.
 
@@ -132,6 +132,30 @@ permissions: {
 
 The message-get grant permits payload inspection. Omit it when payload access is not intended. Domain deployments use the configured $JS.DOMAIN.API prefix instead of $JS.API. Exact stream grants can replace wildcards. Permission to publish application messages is separate from permission to list or inspect streams.
 
+### Scoped access in a shared account
+
+Several identities often share one account, each limited to its own streams. Granting `$SYS.REQ.USER.INFO` lets the dashboard read the signed-in user's grants at sign-in instead of probing. Collection then requests only permitted subjects. Streams outside the user's STREAM.INFO grants are left out without warnings, and streams without a CONSUMER.LIST grant are marked on the stream rather than marking the view partial. The session note names the identity and the number of streams it can access.
+
+STREAM.LIST returns every stream in the account with its configuration and state, so identities that should not learn about other streams can deny it. With USER.INFO granted, the dashboard requests each stream named in a STREAM.INFO grant instead:
+
+```text
+permissions: {
+  publish: {
+    allow: [
+      "$SYS.REQ.USER.INFO",
+      "$JS.API.STREAM.INFO.ORDERS",
+      "$JS.API.CONSUMER.LIST.ORDERS",
+      "$JS.API.CONSUMER.INFO.ORDERS.>",
+      "$JS.API.STREAM.MSG.GET.ORDERS"
+    ]
+    deny: ["$JS.API.STREAM.LIST", "$JS.API.STREAM.NAMES"]
+  }
+  subscribe: { allow: ["_INBOX.>"] }
+}
+```
+
+Grants for requests without a trailing token must name the stream exactly. `$JS.API.CONSUMER.LIST.ORDERS.>` does not match `$JS.API.CONSUMER.LIST.ORDERS`, because `>` requires at least one more token. Wildcard STREAM.INFO grants still need STREAM.LIST to enumerate streams. Grants are read once per sign-in: NATS enforces changed permissions immediately, while the scoped view follows them after signing in again. Without a USER.INFO reply, the dashboard falls back to listing and reports unavailable consumer inventories once, with a marker on each affected stream.
+
 NATS permission denials can surface as request timeouts. The dashboard reports unavailable data without guessing that every timeout is a permission error. Core publishes report acceptance as unconfirmed because a flush is not a publish acknowledgment. JetStream publish acknowledgments can verify storage.
 
 ## Session investigation tools
@@ -146,7 +170,24 @@ These tools work with session-only mode and use the signed-in NATS identity. No 
 | Activity | Explicit failure-advisory watch for one stream | Watches max-delivery and terminated-message events in eight-second windows. Retained-record inspection uses message-get and never consumes or acknowledges application deliveries. |
 | Operations | Reviewed consumer pause and resume | Requires NATS 2.11+, NATSUI_ALLOW_WRITES=1, consumer-info permission and the native pause API grant. Review tokens are single-use, expire after 60 seconds and belong to the login. |
 | Settings | Uploaded certificate details | Subject, issuer, validity and SHA-256 fingerprint. An attention notice appears within 30 days of expiry. Neither the private key nor uploaded certificate body is returned. |
-| Nodes, Connections, Subjects, Topology | Optional monitoring through NATS system requests | Only permitted replies are displayed. Cluster size and silent servers remain unknown. Shared HTTP monitoring is never a fallback. |
+| Nodes, Connections, Subjects, Topology | Optional monitoring through NATS system requests | Only permitted replies are displayed. Cluster size comes only from a reported JetStream meta group. Shared HTTP monitoring is never a fallback. |
+
+### Capabilities and management
+
+Data coverage lists every gated capability for the signed-in login: cluster monitoring, stream listing and creation, and per stream and consumer actions. Each row shows whether the login's grants permit it, the exact publish subjects that enable it, and what granting it exposes. Write capabilities also need NATSUI_ALLOW_WRITES=1. Without a USER.INFO reply the same rows show their requirements with an unknown status.
+
+The same evaluation decides which actions are offered. Stream pages offer publish, purge, consumer creation and stream deletion. Consumer pages offer pause, resume and deletion. A retained record on Messages offers republish and delete. Operations only offers actions and streams the login can use. Every action keeps the reviewed preview, confirmation and audit flow, and NATS still decides each request.
+
+| Action | Publish grants | Effect |
+| --- | --- | --- |
+| Purge stream | `$JS.API.STREAM.PURGE.<stream>` | Removes all records, or those on one subject. Not reversible. |
+| Delete record | `$JS.API.STREAM.MSG.DELETE.<stream>` | Removes one record. Verified by a follow-up read. |
+| Republish record | `$JS.API.STREAM.MSG.GET.<stream>` and the stream's subjects | Stores a copy in the same stream as a new sequence, with original headers except message ID and expectation headers, plus `Natsui-Republished-From`. |
+| Pause or resume consumer | `$JS.API.CONSUMER.INFO.<stream>.<consumer>`, `$JS.API.CONSUMER.PAUSE.<stream>.<consumer>` | Changes future delivery. |
+
+Grant evaluation treats a wildcard requirement as permitted only when a single grant covers it and no denial overlaps it. Coverage spread across several grants is reported as not granted even when NATS would accept each concrete request.
+
+When an identity has VARZ but not ROUTEZ, Replicas draws configured route peers from each server's node metrics. Configured addresses that do not match a server name are counted but not shown.
 
 ### Failure watch
 
@@ -179,9 +220,34 @@ The pause endpoint handles both pause and resume. Domain deployments replace $JS
 
 ### Monitoring through NATS
 
-In session-only mode, Nodes offers Enable monitoring through NATS. This is a per-login choice and starts no background collector. Snapshot requests then ask for VARZ. Connections, Subjects and Topology request CONNZ, SUBSZ and ROUTEZ on demand. Responses use the existing sanitized projections and session trend store. CPU and RAM describe NATS processes.
+In session-only mode, monitoring starts on at sign-in when a NATS server answers a node request and the identity's known grants permit it, or when grants are unknown. With known grants, each inventory is offered only with its own grant: Nodes needs VARZ, Connections and node connection lists need CONNZ, live subscriptions on Subjects need SUBSZ and route topology on Replicas needs ROUTEZ. VARZ reports server-wide process metrics and totals, while CONNZ and SUBSZ list other identities' clients and interest, so restricted identities can receive VARZ alone. Replicas still shows where an identity's own streams are placed without any monitoring grant. Otherwise Nodes offers Enable monitoring through NATS. This is a per-login choice and starts no background collector. Snapshot requests then ask for VARZ. Connections, Subjects and Topology request CONNZ, SUBSZ and ROUTEZ on demand. Responses use the existing sanitized projections and session trend store. CPU and RAM describe NATS processes.
 
 NATS serves these requests in its system account. A dedicated system-account identity can use the following permissions. An application-account identity needs explicitly configured system-service exports/imports as well. Merely adding publish permissions in an application account does not make system services available. System monitoring can expose information across accounts and should be granted only to identities intended to have that operational visibility.
+
+For a single application account, the system account can export the node requests and the application account can import them. Users without a permissions block then receive node data, while restricted users still need publish grants for these subjects:
+
+```text
+accounts {
+  SYS: {
+    exports: [
+      { service: "$SYS.REQ.SERVER.PING.VARZ", response: stream }
+      { service: "$SYS.REQ.SERVER.PING.CONNZ", response: stream }
+      { service: "$SYS.REQ.SERVER.PING.SUBSZ", response: stream }
+      { service: "$SYS.REQ.SERVER.PING.ROUTEZ", response: stream }
+      { service: "$SYS.REQ.SERVER.*.CONNZ", response: stream }
+    ]
+  }
+  APP: {
+    imports: [
+      { service: { account: SYS, subject: "$SYS.REQ.SERVER.PING.VARZ" } }
+      { service: { account: SYS, subject: "$SYS.REQ.SERVER.PING.CONNZ" } }
+      { service: { account: SYS, subject: "$SYS.REQ.SERVER.PING.SUBSZ" } }
+      { service: { account: SYS, subject: "$SYS.REQ.SERVER.PING.ROUTEZ" } }
+      { service: { account: SYS, subject: "$SYS.REQ.SERVER.*.CONNZ" } }
+    ]
+  }
+}
+```
 
 ```text
 permissions: {
@@ -196,7 +262,7 @@ permissions: {
 }
 ```
 
-Each request waits up to 1.2 seconds and accepts up to 32 replies and 4 MB total. Missing replies may reflect permissions, network conditions or unavailable servers. The coverage indicator always treats total cluster size as unknown. Inventories request pages of 100 entries where the server supports pagination. ROUTEZ is a bounded projection of its response. Disabling monitoring stops future monitoring requests and keeps earlier observations in the same session history.
+Each request waits up to 1.2 seconds and accepts up to 32 replies and 4 MB total. Missing replies may reflect permissions, network conditions or unavailable servers. When the replies include a JetStream meta group, the coverage indicator compares responders with its reported size and names members that did not answer. Servers without JetStream are not counted. Without a meta group it shows only the number of responders. Inventories request pages of 100 entries where the server supports pagination. ROUTEZ is a bounded projection of its response. Disabling monitoring stops future monitoring requests and keeps earlier observations in the same session history.
 
 ### Why JetStream access does not imply node access
 

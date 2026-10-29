@@ -272,11 +272,14 @@ impl Auth {
             attempts: Mutex::new((Instant::now(), 0)),
         }))))
     }
-    pub fn open_users(&self, directory: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn open_users(&self, directory: Option<&Path>) -> Result<(), Box<dyn std::error::Error>> {
         let Some(protected) = &self.0 else {
             return Ok(());
         };
-        let db = Connection::open(directory.join("access.sqlite3"))?;
+        let db = match directory {
+            Some(directory) => Connection::open(directory.join("access.sqlite3"))?,
+            None => Connection::open_in_memory()?,
+        };
         db.busy_timeout(Duration::from_secs(2))?;
         db.execute_batch("PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS dashboard_users (id TEXT PRIMARY KEY, role TEXT NOT NULL CHECK(role IN ('viewer','operator','admin')), key_digest BLOB UNIQUE NOT NULL, enabled INTEGER NOT NULL, revision INTEGER NOT NULL);")?;
         db.execute_batch("CREATE TABLE IF NOT EXISTS dashboard_revision (id INTEGER PRIMARY KEY CHECK(id=1), value INTEGER NOT NULL); INSERT OR IGNORE INTO dashboard_revision SELECT 1, COALESCE(MAX(revision),0) FROM dashboard_users;")?;
@@ -1370,7 +1373,7 @@ mod user_tests {
             std::env::temp_dir().join(format!("natsui-user-incarnation-{}", random_key().unwrap()));
         std::fs::create_dir(&directory).unwrap();
         let auth = Auth::from_key(KEY).unwrap();
-        auth.open_users(&directory).unwrap();
+        auth.open_users(Some(&directory)).unwrap();
         let user = auth
             .add_user(NewUser {
                 id: "alice".into(),
@@ -1429,7 +1432,7 @@ mod user_tests {
         let dir = std::env::temp_dir().join(format!("natsui-users-{}", random_key().unwrap()));
         std::fs::create_dir(&dir).unwrap();
         let auth = Auth::from_key(KEY).unwrap();
-        auth.open_users(&dir).unwrap();
+        auth.open_users(Some(&dir)).unwrap();
         let mut keys = Vec::new();
         for (id, role) in [
             ("viewer", Role::Viewer),
@@ -1549,7 +1552,7 @@ mod user_tests {
         .unwrap();
         assert!(auth.issue(fresh, None).is_err());
         let reopened = Auth::from_key(KEY).unwrap();
-        reopened.open_users(&dir).unwrap();
+        reopened.open_users(Some(&dir)).unwrap();
         assert!(reopened.issue(fresh, None).is_err());
         assert!(reopened.issue(&keys[1], None).is_ok());
         assert!(

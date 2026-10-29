@@ -42,3 +42,5 @@ html[data-theme="light"] .flavor-item[data-flavor=""] .swatch{background:#ae5644
 .route-graph svg{width:100%;max-height:360px}.route-edge{stroke:var(--line-2);stroke-width:2}.route-node{fill:var(--accent)}.route-node.unknown{fill:var(--muted)}.route-graph text{fill:var(--text);font:12px var(--mono)}
 
 .session-insights{margin-top:18px}.session-insights p{overflow-wrap:anywhere}.session-insights td{white-space:normal;min-width:120px;line-height:1.6}
+
+.resource-actions{display:flex;flex-wrap:wrap;gap:10px;margin:14px 0}.resource-actions:empty{display:none}#access-capabilities{margin-bottom:20px}#access-capabilities td{white-space:normal;line-height:1.7;vertical-align:top}#access-capabilities code{font:11px var(--mono);overflow-wrap:anywhere}#access-capabilities h3{font-size:12px;margin:22px 0 8px}

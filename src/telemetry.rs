@@ -27,6 +27,10 @@ pub struct Snapshot {
     pub consumers: Vec<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scenario: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capabilities: Option<Value>,
 }
 impl Snapshot {
     pub fn unavailable(reason: &str, scope: &str) -> Self {
@@ -39,6 +43,8 @@ impl Snapshot {
             streams: vec![],
             consumers: vec![],
             scenario: None,
+            access: None,
+            capabilities: None,
         }
     }
 }
@@ -93,31 +99,116 @@ async fn list(
     }
 }
 
-pub async fn observe(client: &async_nats::Client, prefix: &str, scope: &str) -> Snapshot {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(18);
-    let (streams, truncated) = match list(client, format!("{prefix}.STREAM.LIST"), "streams", 300)
-        .await
-    {
-        Ok(result) => result,
-        Err(_) => {
-            return Snapshot::unavailable(
-                "JetStream inventory unavailable. Connectivity, permissions or JetStream configuration may be responsible.",
-                scope,
-            );
+// Streams granted by name are requested one by one, so an identity without STREAM.LIST can
+// still be observed. A granted stream that does not exist is skipped, not reported.
+async fn named_streams(
+    client: &async_nats::Client,
+    prefix: &str,
+    names: Vec<String>,
+    deadline: tokio::time::Instant,
+    issues: &mut Vec<String>,
+) -> Vec<Value> {
+    let mut streams = Vec::new();
+    for name in names.into_iter().take(300) {
+        let reply = tokio::time::timeout_at(
+            deadline,
+            client.request(format!("{prefix}.STREAM.INFO.{name}"), "".into()),
+        )
+        .await;
+        let Ok(Ok(message)) = reply else {
+            issues.push(format!("Stream information unavailable for {name}."));
+            continue;
+        };
+        match serde_json::from_slice::<Value>(&message.payload) {
+            Ok(value) if value["error"]["code"] == 404 => {}
+            Ok(value) if value.get("error").is_none() && value["config"].is_object() => {
+                streams.push(value)
+            }
+            _ => issues.push(format!("Stream information unavailable for {name}.")),
         }
-    };
+    }
+    streams
+}
+
+fn unavailable_consumers(names: &[String]) -> String {
+    match names {
+        [name] => format!("Consumer information unavailable for {name}."),
+        _ => {
+            let shown = names.iter().take(5).cloned().collect::<Vec<_>>().join(", ");
+            let more = names.len().saturating_sub(5);
+            format!(
+                "Consumer information unavailable for {} streams: {shown}{}.",
+                names.len(),
+                if more > 0 {
+                    format!(" and {more} more")
+                } else {
+                    String::new()
+                }
+            )
+        }
+    }
+}
+
+pub async fn observe(client: &async_nats::Client, prefix: &str, scope: &str) -> Snapshot {
+    observe_scoped(client, prefix, scope, None).await
+}
+
+// With known access, only permitted requests are sent and resources outside the identity's
+// grants are left out instead of being reported as failures.
+pub async fn observe_scoped(
+    client: &async_nats::Client,
+    prefix: &str,
+    scope: &str,
+    access: Option<&crate::access::Access>,
+) -> Snapshot {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(18);
+    let restricted = access.filter(|a| a.restricted());
     let mut issues = Vec::new();
+    let (mut streams, truncated) = match restricted {
+        Some(access) if !access.lists_streams(prefix) => {
+            let names = access.named_streams(prefix);
+            (
+                named_streams(client, prefix, names, deadline, &mut issues).await,
+                false,
+            )
+        }
+        _ => match list(client, format!("{prefix}.STREAM.LIST"), "streams", 300).await {
+            Ok(result) => result,
+            Err(_) => {
+                return Snapshot::unavailable(
+                    "JetStream inventory unavailable. Connectivity, permissions or JetStream configuration may be responsible.",
+                    scope,
+                );
+            }
+        },
+    };
+    if let Some(access) = restricted {
+        streams.retain(|s| {
+            s["config"]["name"]
+                .as_str()
+                .is_some_and(|name| access.sees_stream(prefix, name))
+        });
+    }
     if truncated {
         issues.push(
             "Stream inventory capped at 300; summaries cover observed resources only.".into(),
         );
     }
     let mut consumers = Vec::new();
-    for stream in &streams {
-        let Some(name) = stream["config"]["name"].as_str().filter(|s| valid_token(s)) else {
+    let mut without_consumers = Vec::new();
+    for stream in &mut streams {
+        let Some(name) = stream["config"]["name"]
+            .as_str()
+            .filter(|s| valid_token(s))
+            .map(str::to_owned)
+        else {
             issues.push("A stream has an unsupported name or response shape.".into());
             continue;
         };
+        if restricted.is_some_and(|access| !access.lists_consumers(prefix, &name)) {
+            stream["natsui_consumers"] = json!("not_granted");
+            continue;
+        }
         let remaining = 2000usize.saturating_sub(consumers.len());
         if remaining == 0 {
             issues.push("Consumer inventory capped at 2,000.".into());
@@ -149,9 +240,16 @@ pub async fn observe(client: &async_nats::Client, prefix: &str, scope: &str) -> 
                     issues.push(format!("Consumer inventory incomplete for {name}."));
                 }
             }
-            Err(_) => issues.push(format!("Consumer information unavailable for {name}.")),
+            Err(_) => {
+                stream["natsui_consumers"] = json!("unavailable");
+                without_consumers.push(name);
+            }
         }
     }
+    if !without_consumers.is_empty() {
+        issues.push(unavailable_consumers(&without_consumers));
+    }
+    let access = access.map(|a| a.summary(prefix, &streams));
     Snapshot {
         observed_at: now(),
         scope: scope.into(),
@@ -166,6 +264,8 @@ pub async fn observe(client: &async_nats::Client, prefix: &str, scope: &str) -> 
         streams,
         consumers,
         scenario: None,
+        access,
+        capabilities: None,
     }
 }
 
@@ -197,6 +297,8 @@ pub fn demo(scope: &str) -> Snapshot {
         streams,
         consumers,
         scenario: None,
+        access: None,
+        capabilities: None,
     }
 }
 

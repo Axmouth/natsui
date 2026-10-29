@@ -36,7 +36,7 @@ function renderSubjects(){
    const rows=NatsuiDemo.subjectExamples.map(example=>{const name=cell();name.append(resourceLink(example.subject,'#subjects?'+new URLSearchParams({q:example.subject})));return [name,cell(example.detail)];});
    const wrapper=element('div',null,'table-wrap');wrapper.append(table([['Subject'],['Scenario']],rows));examples.append(wrapper,element('hr'));
   }
-  if(!workspaceState.subscriptions&&!workspaceState.loading.subscriptions)loadInventory('subscriptions');
+  if(!workspaceState.subscriptions&&!workspaceState.loading.subscriptions&&!(data.snapshot?.access&&!data.snapshot.access.subscriptions))loadInventory('subscriptions');
  }
  renderSubscriptions();
  if(!subject){host.replaceChildren(element('p',staticDemo?'Choose a sample above or enter a literal subject. The subscription inventory below covers all demo subjects.':'Enter a subject to see configured matches.'));return;}

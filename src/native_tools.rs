@@ -36,7 +36,7 @@ impl SessionTools {
 }
 type Error = (StatusCode, String);
 fn upstream() -> Error {
-    (StatusCode::BAD_GATEWAY, "No usable NATS monitoring reply. Check system service access, reply permissions and connectivity. Cluster size is unknown.".into())
+    (StatusCode::BAD_GATEWAY, "No usable NATS monitoring reply. Check system service access, reply permissions and connectivity.".into())
 }
 
 pub async fn session_info(
@@ -112,10 +112,77 @@ async fn replies(
         Ok(result)
     }
 }
+// The JetStream meta group reports its size and members, which establishes how many
+// JetStream servers should answer. Servers without JetStream are not counted.
+fn membership(values: &[Value]) -> Option<Value> {
+    let metas = values.iter().map(|v| &v["data"]["jetstream"]["meta"]);
+    let meta = metas
+        .clone()
+        .find(|m| m["leader"].is_string() && m["replicas"].is_array())
+        .or_else(|| metas.clone().find(|m| m["cluster_size"].is_u64()))?;
+    let size = meta["cluster_size"]
+        .as_u64()
+        .filter(|n| (1..=32).contains(n))?;
+    let mut servers: Vec<&str> = std::iter::once(&meta["leader"])
+        .chain(
+            meta["replicas"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|r| &r["name"]),
+        )
+        .filter_map(Value::as_str)
+        .filter(|name| telemetry::valid_token(name))
+        .collect();
+    servers.sort_unstable();
+    servers.dedup();
+    servers.truncate(32);
+    Some(json!({"source":"jetstream_meta","size":size,"servers":servers}))
+}
+// VARZ lists each server's configured route URLs. Hosts that equal a known server name
+// become topology edges. Other addresses are only counted, so they are never exposed.
+fn route_peers(data: &Value, known: &[String]) -> Value {
+    let mut peers = vec![];
+    let mut unresolved = 0;
+    for url in data["cluster"]["urls"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .take(64)
+    {
+        let host = url
+            .as_str()
+            .and_then(|u| u.rsplit('@').next())
+            .and_then(|u| u.split("://").last())
+            .and_then(|u| u.split(':').next())
+            .unwrap_or_default();
+        match known.iter().find(|name| name.as_str() == host) {
+            Some(name) if !peers.contains(name) => peers.push(name.clone()),
+            Some(_) => {}
+            None => unresolved += 1,
+        }
+    }
+    json!({"peers":peers,"unresolved":unresolved,"connections":data["routes"].as_u64()})
+}
 pub async fn observe(client: &async_nats::Client, tools: &SessionTools) -> Value {
     let Ok(values) = replies(client, "$SYS.REQ.SERVER.PING.VARZ".into(), json!({})).await else {
         return json!({"status":"unavailable","source":"session_nats","enabled":true,"nodes":[],"detail":upstream().1});
     };
+    let membership = membership(&values);
+    let mut known: Vec<String> = values
+        .iter()
+        .filter_map(|v| v["server"]["name"].as_str())
+        .chain(
+            membership
+                .iter()
+                .flat_map(|m| m["servers"].as_array().into_iter().flatten())
+                .filter_map(Value::as_str),
+        )
+        .filter(|name| telemetry::valid_token(name))
+        .map(str::to_owned)
+        .collect();
+    known.sort();
+    known.dedup();
     let mut slots = tools.servers.lock().await;
     let mut nodes = vec![];
     for value in values {
@@ -127,14 +194,17 @@ pub async fn observe(client: &async_nats::Client, tools: &SessionTools) -> Value
             if nodes.iter().any(|v: &Value| v["slot"] == slot) {
                 continue;
             }
-            nodes.push(crate::monitoring::project_node(
-                &value["data"],
-                slot,
-                telemetry::now(),
-            ));
+            let mut node = crate::monitoring::project_node(&value["data"], slot, telemetry::now());
+            node["route_peers"] = route_peers(&value["data"], &known);
+            nodes.push(node);
         }
     }
-    json!({"status":"partial","source":"session_nats","enabled":true,"nodes":nodes,"detail":"NATS responders only. Total cluster size and silent servers are unknown. Up to 32 replies and 4 MB per request. This session tracks at most 32 distinct server identities."})
+    let detail = if membership.is_some() {
+        "NATS responders, compared with the JetStream meta group reported by those servers. Servers without JetStream are not counted. Up to 32 replies and 4 MB per request. This session tracks at most 32 distinct server identities."
+    } else {
+        "NATS responders only. Servers that do not answer within the request window are not listed. Up to 32 replies and 4 MB per request. This session tracks at most 32 distinct server identities."
+    };
+    json!({"status":"partial","source":"session_nats","enabled":true,"nodes":nodes,"membership":membership,"detail":detail})
 }
 pub async fn inventory(
     client: &async_nats::Client,
@@ -142,6 +212,7 @@ pub async fn inventory(
     kind: &str,
     page: usize,
     server: Option<&str>,
+    access: Option<&crate::access::Access>,
 ) -> Result<Value, Error> {
     if page > 10000 {
         return Err((StatusCode::BAD_REQUEST, "Invalid page".into()));
@@ -156,9 +227,16 @@ pub async fn inventory(
     if !telemetry::valid_token(target) {
         return Err((StatusCode::BAD_REQUEST, "Invalid server identity".into()));
     }
+    let subject = format!("$SYS.REQ.SERVER.{target}.{endpoint}");
+    if access.is_some_and(|access| !access.monitors(&subject)) {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "This inventory is not part of this login's NATS access.".into(),
+        ));
+    }
     let values = replies(
         client,
-        format!("$SYS.REQ.SERVER.{target}.{endpoint}"),
+        subject,
         json!({"offset":page*100,"limit":100,"subscriptions":kind!="routes"}),
     )
     .await?;
@@ -310,4 +388,40 @@ pub async fn watch(
     Ok(Json(
         json!({"events":events,"started":started,"ended":telemetry::now(),"gap":gap,"end_reason":end_reason,"detail":detail}),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn membership_comes_from_the_reported_meta_group() {
+        let follower = json!({"data":{"jetstream":{"meta":{"leader":"nats2","cluster_size":3}}}});
+        let leader = json!({"data":{"jetstream":{"meta":{"leader":"nats2","cluster_size":3,
+            "replicas":[{"name":"nats1"},{"name":"nats3"},{"name":"bad name"}]}}}});
+        assert_eq!(
+            membership(&[follower.clone(), leader]).unwrap(),
+            json!({"source":"jetstream_meta","size":3,"servers":["nats1","nats2","nats3"]})
+        );
+        assert_eq!(
+            membership(&[follower]).unwrap()["servers"],
+            json!(["nats2"])
+        );
+        assert!(membership(&[json!({"data":{}})]).is_none());
+        assert!(membership(&[json!({"data":{"jetstream":{"meta":{"cluster_size":0}}}})]).is_none());
+    }
+
+    #[test]
+    fn route_peers_expose_only_known_server_names() {
+        let known = vec!["nats1".to_owned(), "nats3".to_owned()];
+        let data = json!({"routes":8,"cluster":{"urls":["nats1:6222","nats-route://user:pw@nats3:6222","10.0.0.9:6222","nats1:6222"]}});
+        assert_eq!(
+            route_peers(&data, &known),
+            json!({"peers":["nats1","nats3"],"unresolved":1,"connections":8})
+        );
+        assert_eq!(
+            route_peers(&json!({}), &known),
+            json!({"peers":[],"unresolved":0,"connections":null})
+        );
+    }
 }

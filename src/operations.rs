@@ -38,6 +38,8 @@ pub struct Proposal {
     payload: String,
     #[serde(default)]
     mode: String,
+    #[serde(default)]
+    sequence: u64,
 }
 pub struct Preview {
     proposal: Proposal,
@@ -253,6 +255,41 @@ fn normalize(p: &mut Proposal) -> Result<String, Error> {
             p.config = json!({"pause_until":"0001-01-01T00:00:00Z"});
         }
         "delete_stream" | "delete_consumer" => {}
+        "purge_stream" => {
+            let filter = match &p.config {
+                Value::Null => "",
+                Value::Object(config) if config.keys().all(|k| k == "filter") => config
+                    .get("filter")
+                    .map(|v| v.as_str().ok_or_else(|| bad("filter must be a string")))
+                    .transpose()?
+                    .unwrap_or(""),
+                _ => return Err(bad("Unsupported purge setting")),
+            };
+            if !filter.is_empty() && !messages::valid_filter(filter) {
+                return Err(bad("Invalid purge subject filter"));
+            }
+            p.config = if filter.is_empty() {
+                json!({})
+            } else {
+                json!({"filter":filter})
+            };
+        }
+        "delete_message" | "republish_message" => {
+            if p.sequence == 0 || p.sequence > 9_007_199_254_740_991 {
+                return Err(bad("Choose a retained record sequence"));
+            }
+            if p.action == "republish_message"
+                && !p.subject.is_empty()
+                && (!messages::valid_filter(&p.subject)
+                    || p.subject.contains(['*', '>'])
+                    || p.subject.starts_with('$'))
+            {
+                return Err(bad(
+                    "Use a literal application subject captured by this stream",
+                ));
+            }
+            return Ok(format!("{}#{}", p.stream, p.sequence));
+        }
         _ => return Err(bad("Unsupported operation")),
     }
     Ok(if p.action.ends_with("consumer") {
@@ -326,14 +363,27 @@ pub async fn preview(
             "Resource already exists. No creation request was sent.",
         ));
     }
-    if (proposal.action.starts_with("delete")
-        || proposal.action == "pause_consumer"
-        || proposal.action == "resume_consumer")
-        && observed.is_none()
+    if !proposal.action.starts_with("create") && proposal.action != "publish" && observed.is_none()
     {
         return Err(conflict("Resource no longer exists."));
     }
-    let mut result = json!({"expires_in":60,"confirmation":confirmation,"proposal":proposal,"current":observed,"warning":if proposal.action=="delete_stream"{"Deletion removes retained records and all consumers. NATS has no atomic revision-checked deletion. External replacement between revalidation and deletion cannot be excluded."}else if proposal.action=="delete_consumer"{"Deletion removes the durable cursor and delivery state. It does not stop application processes. NATS has no atomic revision-checked deletion."}else if proposal.action=="publish"{"Core acceptance does not prove storage or processing. JetStream acknowledgment proves storage in the named stream, not application processing. A timeout has an uncertain outcome. No automatic retry is sent."}else if proposal.action=="pause_consumer" || proposal.action=="resume_consumer" {"Changes future consumer delivery. Already delivered work remains in flight. Application processes continue. External changes cannot be atomically excluded."}else{"Creation applies live. Retention and capture rules affect storage and delivery. No application worker is started."}});
+    let record = if proposal.action.ends_with("_message") {
+        let record = messages::lookup(
+            &client,
+            &app.prefix,
+            &proposal.stream,
+            json!({"seq":proposal.sequence}),
+        )
+        .await?
+        .ok_or_else(|| conflict("Record is no longer retained."))?;
+        Some(
+            json!({"subject":record["subject"],"seq":record["seq"],"time":record["time"],
+            "bytes":record["data"].as_str().map(|d| d.len() * 3 / 4)}),
+        )
+    } else {
+        None
+    };
+    let mut result = json!({"expires_in":60,"confirmation":confirmation,"proposal":proposal,"current":observed,"record":record,"warning":if proposal.action=="purge_stream"{"Purging removes retained records, or only those on the filter subject. Consumers lose undelivered and unacknowledged work in the purged range. This cannot be undone."}else if proposal.action=="delete_message"{"Deletion removes one retained record. Consumers that have not received it skip it. This cannot be undone."}else if proposal.action=="republish_message"{"Publishes a copy of the retained record, with its headers, back into this stream as a new sequence. Consumers receive it as a new message. Message ID and expectation headers are removed so the copy is not deduplicated. The original record is unchanged."}else if proposal.action=="delete_stream"{"Deletion removes retained records and all consumers. NATS has no atomic revision-checked deletion. External replacement between revalidation and deletion cannot be excluded."}else if proposal.action=="delete_consumer"{"Deletion removes the durable cursor and delivery state. It does not stop application processes. NATS has no atomic revision-checked deletion."}else if proposal.action=="publish"{"Core acceptance does not prove storage or processing. JetStream acknowledgment proves storage in the named stream, not application processing. A timeout has an uncertain outcome. No automatic retry is sent."}else if proposal.action=="pause_consumer" || proposal.action=="resume_consumer" {"Changes future consumer delivery. Already delivered work remains in flight. Application processes continue. External changes cannot be atomically excluded."}else{"Creation applies live. Retention and capture rules affect storage and delivery. No application worker is started."}});
     let token = app.editor.operation_pending.insert(
         app.auth.review_owner(&headers),
         Preview {
@@ -392,7 +442,9 @@ pub async fn apply(
                 "Audit storage unavailable. No operation was sent.".into(),
             )
         })?;
-    let result = if p.action == "publish" {
+    let result = if p.action == "republish_message" {
+        republish(&client, &app.prefix, &p).await
+    } else if p.action == "publish" {
         if p.mode == "core" {
             tokio::time::timeout(Duration::from_secs(5),async {client.publish(p.subject.clone(),p.payload.clone().into()).await.map_err(upstream)?;client.flush().await.map_err(upstream)?;Ok::<Value,Error>(json!({"mode":"core","accepted_by_server":null,"outcome":"unconfirmed","storage_verified":false,"processing_verified":false}))}).await.map_err(upstream).and_then(|r|r)
         } else {
@@ -417,9 +469,24 @@ pub async fn apply(
                 format!("CONSUMER.DELETE.{}.{}", p.stream, p.consumer),
                 json!({}),
             ),
+            "purge_stream" => (format!("STREAM.PURGE.{}", p.stream), p.config.clone()),
+            "delete_message" => (
+                format!("STREAM.MSG.DELETE.{}", p.stream),
+                json!({"seq":p.sequence}),
+            ),
             _ => return Err(bad("Unsupported operation")),
         };
         match telemetry::request(&client, format!("{}.{suffix}", app.prefix), body).await {
+            Ok(reply) if p.action == "purge_stream" => Ok(
+                json!({"accepted":true,"verified":reply["success"]==true,"purged":reply["purged"],"resource":preview.confirmation}),
+            ),
+            Ok(_) if p.action == "delete_message" => {
+                let gone =
+                    messages::lookup(&client, &app.prefix, &p.stream, json!({"seq":p.sequence}))
+                        .await
+                        .is_ok_and(|record| record.is_none());
+                Ok(json!({"accepted":true,"verified":gone,"resource":preview.confirmation}))
+            }
             Ok(_) => {
                 let observed = lookup(&client, &app.prefix, &p).await;
                 let verified = observed.as_ref().is_ok_and(|state| {
@@ -484,6 +551,72 @@ pub async fn apply(
     }
 }
 
+// Headers that would make NATS deduplicate or reject the copy are dropped. Other headers
+// travel with the payload, and the copy records where it came from.
+fn copy_headers(raw: &[u8], stream: &str, sequence: u64) -> async_nats::HeaderMap {
+    let mut headers = async_nats::HeaderMap::new();
+    let text = String::from_utf8_lossy(raw);
+    for line in text.split("\r\n").skip(1) {
+        let Some((key, value)) = line.split_once(':') else {
+            continue;
+        };
+        let key = key.trim();
+        if key.is_empty()
+            || key.eq_ignore_ascii_case("Nats-Msg-Id")
+            || key.to_ascii_lowercase().starts_with("nats-expected-")
+        {
+            continue;
+        }
+        headers.append(key, value.trim());
+    }
+    headers.insert(
+        "Natsui-Republished-From",
+        format!("{stream}#{sequence}").as_str(),
+    );
+    headers.insert("Nats-Expected-Stream", stream);
+    headers
+}
+async fn republish(
+    client: &async_nats::Client,
+    prefix: &str,
+    p: &Proposal,
+) -> Result<Value, Error> {
+    use base64::Engine;
+    let record = messages::lookup(client, prefix, &p.stream, json!({"seq":p.sequence}))
+        .await?
+        .ok_or_else(|| conflict("Record is no longer retained. Nothing was published."))?;
+    let decode = |field: &str| {
+        record[field]
+            .as_str()
+            .map(|v| base64::engine::general_purpose::STANDARD.decode(v))
+            .transpose()
+            .map_err(|_| upstream("invalid record encoding"))
+            .map(Option::unwrap_or_default)
+    };
+    let payload = decode("data")?;
+    let headers = copy_headers(&decode("hdrs")?, &p.stream, p.sequence);
+    let subject = if p.subject.is_empty() {
+        record["subject"].as_str().unwrap_or_default().to_owned()
+    } else {
+        p.subject.clone()
+    };
+    let js = async_nats::jetstream::with_prefix(client.clone(), prefix);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        let ack = js
+            .publish_with_headers(subject.clone(), headers, payload.into())
+            .await
+            .map_err(upstream)?
+            .await
+            .map_err(upstream)?;
+        Ok::<Value, Error>(
+            json!({"accepted":true,"verified":true,"subject":subject,"stream":ack.stream,"sequence":ack.sequence,"storage_verified":true,"processing_verified":false}),
+        )
+    })
+    .await
+    .map_err(upstream)
+    .and_then(|r| r)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -507,5 +640,42 @@ mod tests {
         normalize(&mut consumer).unwrap();
         assert_eq!(consumer.config["ack_policy"], "explicit");
         assert!(consumer.config.get("deliver_subject").is_none());
+    }
+    #[test]
+    fn record_actions_validate_scope_and_confirmation() {
+        for value in [
+            json!({"action":"delete_message","stream":"ORDERS"}),
+            json!({"action":"republish_message","stream":"ORDERS","sequence":4,"subject":"orders.*"}),
+            json!({"action":"republish_message","stream":"ORDERS","sequence":4,"subject":"$JS.API.STREAM.DELETE.ORDERS"}),
+            json!({"action":"purge_stream","stream":"ORDERS","config":{"keep":1}}),
+            json!({"action":"purge_stream","stream":"ORDERS","config":{"filter":"bad subject"}}),
+        ] {
+            assert!(normalize(&mut proposal(value)).is_err());
+        }
+        let mut purge = proposal(
+            json!({"action":"purge_stream","stream":"ORDERS","config":{"filter":"orders.eu"}}),
+        );
+        assert_eq!(normalize(&mut purge).unwrap(), "ORDERS");
+        assert_eq!(purge.config, json!({"filter":"orders.eu"}));
+        let mut delete =
+            proposal(json!({"action":"delete_message","stream":"ORDERS","sequence":7}));
+        assert_eq!(normalize(&mut delete).unwrap(), "ORDERS#7");
+    }
+    #[test]
+    fn copies_drop_deduplication_and_expectation_headers() {
+        let raw =
+            b"NATS/1.0\r\nNats-Msg-Id: abc\r\nNats-Expected-Last-Sequence: 3\r\nTrace: t1\r\n\r\n";
+        let headers = copy_headers(raw, "ORDERS", 7);
+        assert!(headers.get("Nats-Msg-Id").is_none());
+        assert!(headers.get("Nats-Expected-Last-Sequence").is_none());
+        assert_eq!(headers.get("Trace").unwrap().as_str(), "t1");
+        assert_eq!(
+            headers.get("Natsui-Republished-From").unwrap().as_str(),
+            "ORDERS#7"
+        );
+        assert_eq!(
+            headers.get("Nats-Expected-Stream").unwrap().as_str(),
+            "ORDERS"
+        );
     }
 }

@@ -32,6 +32,52 @@
     $('operation-stream').required =
       action !== 'publish' || $('operation-mode').value === 'jetstream';
     $('operation-consumer').required = action.endsWith('consumer');
+    streams(action);
+  }
+  // Suggestions follow this login's grants. Typed names are still sent, and NATS decides.
+  function streams(action) {
+    $('operation-streams').replaceChildren(
+      ...(data?.snapshot.streams || [])
+        .filter((s) => !/^KV_|^OBJ_/.test(s.config.name))
+        .filter(
+          (s) =>
+            action === 'create_stream' ||
+            action.endsWith('consumer') && action !== 'create_consumer' ||
+            NatsuiAccess.action(action, s.config.name) !== false,
+        )
+        .map((s) => {
+          const o = element('option');
+          o.value = s.config.name;
+          return o;
+        }),
+    );
+  }
+  function gate() {
+    for (const option of $('operation-action').options) {
+      const state = NatsuiAccess.action(option.value);
+      option.disabled = state === false;
+      option.title =
+        state === false
+          ? 'Not available to this login. Data coverage lists what enables it.'
+          : '';
+    }
+    const select = $('operation-action');
+    if (select.selectedOptions[0]?.disabled) {
+      const first = [...select.options].find((o) => !o.disabled);
+      if (first) select.value = first.value;
+    }
+  }
+  function prefill() {
+    const q = filters();
+    if (!q.get('action')) return;
+    $('operation-action').value = q.get('action');
+    for (const [key, id] of [
+      ['stream', 'operation-stream'],
+      ['consumer', 'operation-consumer'],
+      ['sequence', 'operation-sequence'],
+    ])
+      if (q.get(key)) $(id).value = q.get(key);
+    if (q.get('action') === 'publish') $('operation-mode').value = 'jetstream';
   }
   form.addEventListener('input', reset);
   $('operation-action').onchange = fields;
@@ -70,6 +116,14 @@
       if(!Number.isFinite(date.getTime())){status.textContent='Choose a valid pause end time.';working=false;$('operation-preview').disabled=!enabled;return;}
       p.config={pause_until:date.toISOString()};
     }
+    if (p.action === 'purge_stream') {
+      const filter = $('operation-purge-filter').value.trim();
+      p.config = filter ? { filter } : {};
+    }
+    if (p.action === 'delete_message' || p.action === 'republish_message')
+      p.sequence = Number($('operation-sequence').value);
+    if (p.action === 'republish_message' && $('operation-republish-subject').value.trim())
+      p.subject = $('operation-republish-subject').value.trim();
     if (p.action === 'publish')
       Object.assign(p, {
         mode: $('operation-mode').value,
@@ -80,7 +134,9 @@
       preview = await send('/api/operations/preview', p);
       $('operation-warning').textContent = preview.warning;
       $('operation-details').textContent = JSON.stringify(
-        preview.proposal,
+        preview.record
+          ? { ...preview.proposal, record: preview.record }
+          : preview.proposal,
         null,
         2,
       );
@@ -106,7 +162,11 @@
       });
       reset();
       status.textContent =
-        result.mode === 'jetstream'
+        result.purged != null
+          ? `Purged ${number(result.purged)} records from ${result.resource}.`
+          : result.subject && result.sequence != null
+            ? `Republished to ${result.subject}, stored in ${result.stream} at sequence ${number(result.sequence)}. Application processing is not tracked.`
+            : result.mode === 'jetstream'
           ? 'Stored in ' +
             result.stream +
             ' at sequence ' +
@@ -149,15 +209,8 @@
     form
       .querySelectorAll('input,select,textarea,button')
       .forEach((e) => (e.disabled = !enabled));
-    $('operation-streams').replaceChildren(
-      ...(data?.snapshot.streams || [])
-        .filter((s) => !/^KV_|^OBJ_/.test(s.config.name))
-        .map((s) => {
-          const o = element('option');
-          o.value = s.config.name;
-          return o;
-        }),
-    );
+    prefill();
+    gate();
     fields();
   }
   window.addEventListener('hashchange', enter);

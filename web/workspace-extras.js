@@ -265,12 +265,12 @@
   routeStatus.setAttribute('role', 'status');
   const routeGraph = element('div', null, 'route-graph');
   const routeTable = element('div', null, 'table-wrap');
+  const liveRoutesIntro =
+    'Reported server-to-server connections. Route pools can create several connections between a pair. Counters are per reported direction and may include multiple accounts. Unobserved peers and failed endpoints remain unknown.';
+  const routeIntro = element('p', liveRoutesIntro);
   topology.append(
     element('h2', 'Cluster routes'),
-    element(
-      'p',
-      'Reported server-to-server connections. Route pools can create several connections between a pair. Counters are per reported direction and may include multiple accounts. Unobserved peers and failed endpoints remain unknown.',
-    ),
+    routeIntro,
     reloadRoutes,
     routeStatus,
     routeGraph,
@@ -334,62 +334,7 @@
         (n) => n.status === 'complete',
       ).length;
       routeStatus.textContent = `${complete}/${result.nodes.length} endpoints complete. ${rows.length} reported routes, up to 100 per endpoint. Observed ${new Date(result.at * 1000).toLocaleTimeString()}. ${result.scope || ''}`;
-      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-      svg.setAttribute('viewBox', '0 0 700 320');
-      svg.setAttribute('role', 'img');
-      svg.setAttribute('aria-label', 'Reported cluster route topology');
-      const nodes = [...peers.values()].slice(0, 64),
-        positions = new Map(
-          nodes.map((n, i) => [
-            n.id,
-            {
-              x: 350 + 240 * Math.cos((i * Math.PI * 2) / nodes.length),
-              y: 160 + 105 * Math.sin((i * Math.PI * 2) / nodes.length),
-            },
-          ]),
-        );
-      const draw = (tag, attrs, text) => {
-        const el = document.createElementNS(svg.namespaceURI, tag);
-        for (const [key, value] of Object.entries(attrs))
-          el.setAttribute(key, value);
-        if (text) el.textContent = text;
-        svg.append(el);
-        return el;
-      };
-      for (const [a, b] of links.values()) {
-        const first = positions.get(a),
-          last = positions.get(b);
-        if (first && last)
-          draw('line', {
-            x1: first.x,
-            y1: first.y,
-            x2: last.x,
-            y2: last.y,
-            class: 'route-edge',
-          });
-      }
-      for (const node of nodes) {
-        const p = positions.get(node.id);
-        draw('circle', {
-          cx: p.x,
-          cy: p.y,
-          r: 12,
-          class: node.observed ? 'route-node' : 'route-node unknown',
-        });
-        const text = draw(
-          'text',
-          {
-            x: p.x,
-            y: p.y + 29,
-            'text-anchor': 'middle',
-          },
-          node.name.slice(0, 30),
-        );
-        const title = document.createElementNS(svg.namespaceURI, 'title');
-        title.textContent = `${node.name}: ${node.observed ? 'monitoring complete' : 'monitoring unknown or incomplete'}`;
-        text.append(title);
-      }
-      routeGraph.replaceChildren(svg);
+      drawTopology(peers, links);
       if (peers.size > 64)
         routeStatus.textContent += ' Diagram limited to 64 nodes.';
       routeLoaded = Date.now();
@@ -402,12 +347,114 @@
       reloadRoutes.disabled = false;
     }
   }
+  function drawTopology(peers, links) {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 700 320');
+    svg.setAttribute('role', 'img');
+    svg.setAttribute('aria-label', 'Reported cluster route topology');
+    const nodes = [...peers.values()].slice(0, 64),
+      positions = new Map(
+        nodes.map((n, i) => [
+          n.id,
+          {
+            x: 350 + 240 * Math.cos((i * Math.PI * 2) / nodes.length),
+            y: 160 + 105 * Math.sin((i * Math.PI * 2) / nodes.length),
+          },
+        ]),
+      );
+    const draw = (tag, attrs, text) => {
+      const el = document.createElementNS(svg.namespaceURI, tag);
+      for (const [key, value] of Object.entries(attrs))
+        el.setAttribute(key, value);
+      if (text) el.textContent = text;
+      svg.append(el);
+      return el;
+    };
+    for (const [a, b] of links.values()) {
+      const first = positions.get(a),
+        last = positions.get(b);
+      if (first && last)
+        draw('line', {
+          x1: first.x,
+          y1: first.y,
+          x2: last.x,
+          y2: last.y,
+          class: 'route-edge',
+        });
+    }
+    for (const node of nodes) {
+      const p = positions.get(node.id);
+      draw('circle', {
+        cx: p.x,
+        cy: p.y,
+        r: 12,
+        class: node.observed ? 'route-node' : 'route-node unknown',
+      });
+      const text = draw(
+        'text',
+        {
+          x: p.x,
+          y: p.y + 29,
+          'text-anchor': 'middle',
+        },
+        node.name.slice(0, 30),
+      );
+      const title = document.createElementNS(svg.namespaceURI, 'title');
+      title.textContent = `${node.name}: ${node.observed ? 'monitoring complete' : 'monitoring unknown or incomplete'}`;
+      text.append(title);
+    }
+    routeGraph.replaceChildren(svg);
+  }
+  // Without route monitoring access, each server's configured route peers from its
+  // node metrics still describe the topology. Per-route traffic stays unavailable.
+  function configuredRoutes() {
+    const nodes = (data.monitoring?.nodes || []).filter((n) => n.server_name);
+    const peers = new Map(),
+      links = new Map();
+    const members = data.monitoring?.membership?.servers || [];
+    for (const name of members)
+      peers.set(name, { id: name, name, observed: false });
+    for (const node of nodes)
+      peers.set(node.server_name, {
+        id: node.server_name,
+        name: node.server_name,
+        observed: node.status === 'complete',
+      });
+    let unresolved = 0;
+    for (const node of nodes) {
+      unresolved += node.route_peers?.unresolved || 0;
+      for (const peer of node.route_peers?.peers || []) {
+        if (!peers.has(peer))
+          peers.set(peer, { id: peer, name: peer, observed: false });
+        links.set(JSON.stringify([node.server_name, peer].sort()), [
+          node.server_name,
+          peer,
+        ]);
+      }
+    }
+    routeTable.replaceChildren();
+    if (!nodes.length) {
+      routeGraph.replaceChildren();
+      routeStatus.textContent = 'Waiting for node metrics.';
+      return;
+    }
+    drawTopology(peers, links);
+    routeStatus.textContent = `Configured routes reported by ${nodes.length} ${nodes.length === 1 ? 'server' : 'servers'}.${unresolved ? ` ${unresolved} configured ${unresolved === 1 ? 'address does' : 'addresses do'} not match a server name.` : ''} Live route traffic needs route monitoring access.`;
+  }
   reloadRoutes.onclick = loadRoutes;
   const oldRender = renderWorkspace;
   renderWorkspace = () => {
     oldRender();
-    if (currentPage() === 'replicas' && Date.now() - routeLoaded > 15000)
-      loadRoutes();
+    const access = data.snapshot?.access;
+    const configured = !!(access && !access.routes);
+    topology.hidden = configured && !access.monitoring;
+    reloadRoutes.hidden = configured;
+    routeIntro.textContent = configured
+      ? "Configured server-to-server routes from each server's node metrics. An edge means a server lists that peer in its route configuration, not that the route is currently connected."
+      : liveRoutesIntro;
+    if (topology.hidden || currentPage() !== 'replicas') return;
+    if (configured) configuredRoutes();
+    else if (Date.now() - routeLoaded > 15000) loadRoutes();
   };
 
   // Fetch streaming preserves the explicit profile header used by normal reads.

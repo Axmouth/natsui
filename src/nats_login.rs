@@ -52,6 +52,9 @@ impl Policy {
 pub struct Session {
     pub profile: String,
     pub username: String,
+    // Discovered once at sign-in. Changed server permissions apply to every request
+    // immediately, while the scoped view follows them after the next sign-in.
+    pub access: Option<crate::access::Access>,
     pub connection: connection::Config,
     pub observations: Option<Observations>,
     pub tools: crate::native_tools::SessionTools,
@@ -161,17 +164,27 @@ pub async fn login(
             }
         }
     };
-    if connection.connect_user().await.is_err() {
+    let Ok(client) = connection.connect_user().await else {
         return (
             StatusCode::UNAUTHORIZED,
             "NATS login failed. Check credentials, connectivity and server authentication.",
         )
             .into_response();
-    }
+    };
+    let access = crate::access::discover(&client).await;
+    // Without known grants, one probe at sign-in decides whether node monitoring starts on.
+    let nodes = match &access {
+        Some(access) => access.monitors_nodes(),
+        None => crate::access::reaches_nodes(&client).await,
+    };
+    drop(client);
     let tools = match crate::native_tools::SessionTools::new(certificate_details) {
         Ok(tools) => tools,
         Err(error) => return (StatusCode::SERVICE_UNAVAILABLE, error).into_response(),
     };
+    if app.auth.nats_policy().session_only && nodes {
+        tools.monitoring.lock().await.enabled = true;
+    }
     let observations = if app.auth.nats_policy().session_only {
         match Observations::new(tools.db.clone()) {
             Ok(observations) => Some(observations),
@@ -184,6 +197,7 @@ pub async fn login(
         Session {
             profile: credentials.profile,
             username,
+            access,
             connection,
             observations,
             tools,
@@ -340,6 +354,7 @@ pub async fn dispatch(mut app: App, session: Arc<Session>, request: Request) -> 
                         "connections",
                         0,
                         Some(&server),
+                        session.access.as_ref(),
                     )
                     .await
                 }
@@ -355,6 +370,7 @@ pub async fn dispatch(mut app: App, session: Arc<Session>, request: Request) -> 
                 parts.last().unwrap_or(&""),
                 page,
                 None,
+                session.access.as_ref(),
             )
             .await
         };
@@ -382,7 +398,7 @@ pub async fn dispatch(mut app: App, session: Arc<Session>, request: Request) -> 
     } else if needs_inventory(&path) {
         tokio::time::timeout(
             Duration::from_secs(20),
-            telemetry::observe(&client, &app.prefix, &app.scope),
+            telemetry::observe_scoped(&client, &app.prefix, &app.scope, session.access.as_ref()),
         )
         .await
         .unwrap_or_else(|_| {
@@ -394,6 +410,14 @@ pub async fn dispatch(mut app: App, session: Arc<Session>, request: Request) -> 
             &app.scope,
         )
     };
+    if cached.is_none() && needs_inventory(&path) {
+        state.capabilities = Some(crate::access::capabilities(
+            session.access.as_ref(),
+            &app.prefix,
+            &state.streams,
+            &state.consumers,
+        ));
+    }
     let mut monitoring = if session_monitoring && path == "/api/snapshot" {
         crate::native_tools::observe(&client, &session.tools).await
     } else if policy.session_only {

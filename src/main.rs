@@ -1,3 +1,4 @@
+mod access;
 mod auth;
 mod backlog;
 mod buckets;
@@ -119,8 +120,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let domain = deployment::domain()?;
     let scope = std::env::var("NATSUI_PROFILE").unwrap_or("Local NATS".into());
     let dir = std::env::var("NATSUI_DATA_DIR").unwrap_or("data".into());
-    let db = store::Database::open(&dir)?;
-    auth.open_users(std::path::Path::new(&dir))?;
+    let persistent = !session_only || store::Database::writable(&dir);
+    let db = if persistent {
+        store::Database::open(&dir)?
+    } else {
+        println!(
+            "Dashboard storage: memory only ({dir} is not writable). Settings and dashboard users reset on restart."
+        );
+        store::Database::memory()?
+    };
+    auth.open_users(persistent.then(|| std::path::Path::new(&dir)))?;
     if let Some(path) = std::env::var_os("NATSUI_ACCESS_POLICY_FILE") {
         use std::io::Read;
         let mut bytes = Vec::new();
@@ -201,7 +210,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tokio::spawn(collect(app.clone()));
         tokio::spawn(incidents::collect(app.clone()));
     }
-    let router = profiles::router(app, &dir).await?;
+    let router = profiles::router(app, persistent.then_some(dir.as_str())).await?;
     let listener = tokio::net::TcpListener::bind(address).await?;
     println!(
         "natsui: {}://{address} ({})",
@@ -317,6 +326,15 @@ fn application_routes(app: App) -> Router {
             "/api/operations/apply",
             axum::routing::post(operations::apply)
                 .layer(axum::extract::DefaultBodyLimit::max(2048)),
+        )
+        .route(
+            "/capabilities.js",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/javascript")],
+                    include_str!("../web/capabilities.js"),
+                )
+            }),
         )
         .route(
             "/operations.js",

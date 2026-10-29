@@ -117,7 +117,10 @@ fn selected(headers: &HeaderMap) -> String {
         .unwrap_or("default")
         .to_owned()
 }
-pub async fn router(base: App, directory: &str) -> Result<Router, Box<dyn std::error::Error>> {
+pub async fn router(
+    base: App,
+    directory: Option<&str>,
+) -> Result<Router, Box<dyn std::error::Error>> {
     let mut contexts = BTreeMap::new();
     contexts.insert("default".to_owned(), base.clone());
     let mut apps = BTreeMap::new();
@@ -134,8 +137,13 @@ pub async fn router(base: App, directory: &str) -> Result<Router, Box<dyn std::e
             }
             connection.options().await?;
             let binding = connection.binding(&profile.domain)?;
-            let directory = PathBuf::from(directory).join("profiles").join(&profile.id);
-            let db = store::Database::open(directory.to_str().ok_or("Invalid profile directory")?)?;
+            let db = match directory {
+                Some(directory) => {
+                    let directory = PathBuf::from(directory).join("profiles").join(&profile.id);
+                    store::Database::open(directory.to_str().ok_or("Invalid profile directory")?)?
+                }
+                None => store::Database::memory()?,
+            };
             db.bind_profile(&profile.name, false, &binding, false)
                 .await?;
             let monitor = profile.monitor(base.auth.nats_policy().session_only)?;
@@ -327,6 +335,7 @@ mod tests {
         let identity = || crate::nats_login::Session {
             profile: "default".into(),
             username: "reader".into(),
+            access: None,
             observations: None,
             tools: crate::native_tools::SessionTools::new(None).unwrap(),
             connection: connection::Config {

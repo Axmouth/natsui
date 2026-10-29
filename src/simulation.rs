@@ -78,6 +78,8 @@ pub fn snapshot(scope: &str, elapsed: u64) -> Snapshot {
         scenario: Some(
             json!({"phase":phase,"description":explanation,"second":tick,"duration":120,"source":"simulation"}),
         ),
+        access: None,
+        capabilities: None,
     }
 }
 

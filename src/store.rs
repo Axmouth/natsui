@@ -12,6 +12,7 @@ pub struct Database(
     Arc<Mutex<Connection>>,
     Arc<Mutex<BTreeMap<String, Value>>>,
     usize,
+    bool,
 );
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Settings {
@@ -46,12 +47,31 @@ impl Database {
         let budget = crate::deployment::history_budget()?;
         std::fs::create_dir_all(dir)?;
         let conn = Connection::open(std::path::Path::new(dir).join("natsui.sqlite3"))?;
-        Self::initialize(conn, budget)
+        Self::initialize(conn, budget, true)
+    }
+    // A session-only deployment keeps nothing that must survive a restart, so it can run
+    // without a writable data directory. Settings then start from defaults on each start.
+    pub fn memory() -> Result<Self, Box<dyn std::error::Error>> {
+        Self::initialize(
+            Connection::open_in_memory()?,
+            crate::deployment::history_budget()?,
+            false,
+        )
+    }
+    pub fn writable(dir: &str) -> bool {
+        let probe = std::path::Path::new(dir).join(".natsui-write-check");
+        let usable = std::fs::create_dir_all(dir).is_ok() && std::fs::write(&probe, b"").is_ok();
+        let _ = std::fs::remove_file(probe);
+        usable
     }
     pub fn session() -> Result<Self, Box<dyn std::error::Error>> {
-        Self::initialize(Connection::open_in_memory()?, 4 * 1024 * 1024)
+        Self::initialize(Connection::open_in_memory()?, 4 * 1024 * 1024, false)
     }
-    fn initialize(conn: Connection, budget: usize) -> Result<Self, Box<dyn std::error::Error>> {
+    fn initialize(
+        conn: Connection,
+        budget: usize,
+        persistent: bool,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let version: u32 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
         if version > 3 {
             return Err("Database schema is newer than this application".into());
@@ -83,6 +103,7 @@ impl Database {
             Arc::new(Mutex::new(conn)),
             Arc::new(Mutex::new(BTreeMap::new())),
             budget,
+            persistent,
         ))
     }
     async fn run<T: Send + 'static>(
@@ -112,7 +133,7 @@ impl Database {
     pub fn health(&self) -> Value {
         match self.1.lock() {
             Ok(operations) => {
-                json!({"status":if operations.values().any(|v|v["status"]=="failed") {"degraded"}else{"ok"},"operations":*operations,"history_budget_bytes":self.2,"incident_budget_bytes":self.2.min(16*1024*1024)})
+                json!({"status":if operations.values().any(|v|v["status"]=="failed") {"degraded"}else{"ok"},"operations":*operations,"history_budget_bytes":self.2,"incident_budget_bytes":self.2.min(16*1024*1024),"persistence":if self.3 {"disk"} else {"memory"}})
             }
             Err(_) => json!({"status":"unavailable"}),
         }
