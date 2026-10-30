@@ -61,10 +61,10 @@ The start command resumes it. Adding `-v` to the stop command deletes this demo'
 
 ## Pin a release
 
-The `v0.2.0` image supports Linux AMD64 and ARM64:
+The `v0.3.0` image supports Linux AMD64 and ARM64:
 
 ```sh
-docker pull ghcr.io/axmouth/natsui:v0.2.0
+docker pull ghcr.io/axmouth/natsui:v0.3.0
 ```
 
 Replace `ghcr.io/axmouth/natsui:latest` in deployment commands or Compose files with this version to avoid automatic version changes on image pulls. `latest` and `main` follow verified updates. Release tags are not reused by the publishing workflow. Digest references provide an exact content pin. [Release policy and publishing](docs/RELEASES.md) covers version tags, digest pins and the separate demo bundle.

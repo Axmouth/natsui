@@ -3,24 +3,24 @@
 ## Select a fixed version
 
 ```sh
-docker pull ghcr.io/axmouth/natsui:v0.2.0
+docker pull ghcr.io/axmouth/natsui:v0.3.0
 ```
 
-Both `ghcr.io/axmouth/natsui:v0.2.0` and `ghcr.io/axmouth/natsui-traffic:v0.2.0` contain Linux AMD64 and ARM64 images. Docker selects the matching architecture. The traffic image is only needed for generated demo workloads.
+Both `ghcr.io/axmouth/natsui:v0.3.0` and `ghcr.io/axmouth/natsui-traffic:v0.3.0` contain Linux AMD64 and ARM64 images. Docker selects the matching architecture. The traffic image is only needed for generated demo workloads.
 
-The [setup guide](SETUP.md) describes deployment settings, persistent volumes and NATS sign-in. Replacing `:latest` with `:v0.2.0` selects the fixed release without changing those settings.
+The [setup guide](SETUP.md) describes deployment settings, persistent volumes and NATS sign-in. Replacing `:latest` with `:v0.3.0` selects the fixed release without changing those settings.
 
 ## Tags and content pins
 
 - `latest` and `main` advance after verification and a real cluster smoke test.
-- `v0.2.0` identifies a release. The publishing workflow refuses to replace an existing version tag with a different manifest digest.
+- `v0.3.0` identifies a release. The publishing workflow refuses to replace an existing version tag with a different manifest digest.
 - `sha-<commit>` identifies images built from a commit. These tags can change if the commit is rebuilt with updated base images.
 - `@sha256:<digest>` pins exact registry content independently of tag changes. Registry administrators can still alter tags outside the workflow.
 
 Inspect a release digest:
 
 ```sh
-docker buildx imagetools inspect ghcr.io/axmouth/natsui:v0.2.0
+docker buildx imagetools inspect ghcr.io/axmouth/natsui:v0.3.0
 ```
 
 The top-level `Digest` identifies the multi-platform image. An exact deployment reference has the form `ghcr.io/axmouth/natsui@sha256:<digest>`, with `<digest>` replaced by the hexadecimal value after `sha256:` in that output.
@@ -32,8 +32,8 @@ The one-command demo uses a separate Compose artifact, `ghcr.io/axmouth/natsui-d
 The release commit must be on `main`, with a matching `version` in `Cargo.toml` and an annotated `vMAJOR.MINOR.PATCH` Git tag. For example:
 
 ```sh
-git tag -a v0.2.0 -m "Release v0.2.0"
-git push --atomic origin main v0.2.0
+git tag -a v0.3.0 -m "Release v0.3.0"
+git push --atomic origin main v0.3.0
 ```
 
 The atomic push makes the release tag available before verification starts. The main branch run verifies native builds, container behavior and browser regressions. Publication then builds both architectures, exercises real NATS traffic and verifies the published Compose bundle. Only these verified images receive the version tags. No separate rebuild occurs during version promotion.

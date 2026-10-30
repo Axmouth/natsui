@@ -52,3 +52,5 @@ Scoped access, the capability overview and record management shipped in v0.2.0. 
 - [ ] Account-aware history and incident identities, so equal stream names in different accounts keep separate trends.
 - [ ] Administrator connection lists per account through an exported `$SYS.REQ.ACCOUNT.*.CONNZ`, labeled like streams.
 - [ ] Readability pass over the dense browser scripts: split long one-line functions, name intermediate values, and add JSDoc types checked with `tsc --checkJs` so the asset-only build stays.
+- [ ] Clearer error when NATS denies an operation. Permission denials arrive as request timeouts, so the operation result should point to the login's capabilities instead of a generic failure.
+- [ ] Explain a decision, after Fibril's access control design: enter an action and a stream or subject, and show the grant that allows or denies it for the signed-in login.
