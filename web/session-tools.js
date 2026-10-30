@@ -58,7 +58,7 @@
     const snapshot=data.snapshot;
     if(currentPage()==='consumers'){
     const indexedHistory=NatsuiDiagnostics.indexed(history);
-    const rows=visibleConsumers().map(c=>{const stream=snapshot.streams.find(s=>s.config.name===c.stream_name);const d=NatsuiDiagnostics.consumer(c,stream,snapshot,indexedHistory);return [cell(c.stream_name+' / '+c.name),cell(d.facts.map(f=>f.text).join('. ')||d.coverage),cell(d.facts.map(f=>f.detail).join(' '))];});
+    const rows=visibleConsumers().map(c=>{const stream=snapshot.streams.find(s=>streamId(s)===consumerStreamId(c));const d=NatsuiDiagnostics.consumer(c,stream,snapshot,indexedHistory);return [cell(c.stream_name+' / '+c.name),cell(d.facts.map(f=>f.text).join('. ')||d.coverage),cell(d.facts.map(f=>f.detail).join(' '))];});
     diagnosticRows.replaceChildren(table([['Consumer'],['Observation'],['Evidence boundary']],rows));
     }
     if(currentPage()==='streams')retentionRows.replaceChildren(table([['Stream'],['Oldest retained'],['Record headroom'],['Byte headroom'],['Retention / age limit'],['At capacity']],snapshot.streams.filter(s=>`${s.config?.name} ${s.config?.subjects?.join(' ')}`.toLowerCase().includes($('stream-search').value.toLowerCase())).map(stream=>{const r=NatsuiDiagnostics.retention(stream,snapshot.observed_at);return [cell(stream.config.name),cell(r.empty?'Empty stream':age(r.oldest)),cell(r.limits[0].limit==null?(r.limits[0].unlimited?'No configured limit':'Unavailable'):number(r.limits[0].remaining)),cell(r.limits[1].limit==null?(r.limits[1].unlimited?'No configured limit':'Unavailable'):bytes(r.limits[1].remaining)),cell(`${r.policy} / ${r.maxAge==null?(r.unlimitedAge?'no age limit':'age limit unavailable'):age(r.maxAge)}`),cell(r.effect)];})));

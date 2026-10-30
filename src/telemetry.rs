@@ -49,6 +49,9 @@ impl Snapshot {
     }
 }
 
+pub const NO_JETSTREAM: &str = "No JetStream for this account";
+const NO_JETSTREAM_VIEW: &str = "No JetStream answers for this account and profile. The account may not have JetStream enabled, or its streams are reached through another profile.";
+
 pub async fn request(
     client: &async_nats::Client,
     subject: String,
@@ -60,7 +63,13 @@ pub async fn request(
     )
     .await
     .map_err(|_| "Request timed out")?
-    .map_err(|_| "NATS request failed")?;
+    .map_err(|e| {
+        if e.kind() == async_nats::RequestErrorKind::NoResponders {
+            NO_JETSTREAM
+        } else {
+            "NATS request failed"
+        }
+    })?;
     // Payloads remain on demand. A response cap bounds message inspection and
     // protects the dashboard from unexpectedly large management responses.
     if message.payload.len() > 2_000_000 {
@@ -68,6 +77,9 @@ pub async fn request(
     }
     let value: Value =
         serde_json::from_slice(&message.payload).map_err(|_| "Invalid NATS response")?;
+    if value["error"]["err_code"] == 10039 {
+        return Err(NO_JETSTREAM.into());
+    }
     if value.get("error").is_some() {
         return Err("NATS returned an API error (resource, permissions or feature support)".into());
     }
@@ -174,6 +186,26 @@ pub async fn observe_scoped(
         }
         _ => match list(client, format!("{prefix}.STREAM.LIST"), "streams", 300).await {
             Ok(result) => result,
+            // A shared account can export single streams without its stream listing. The
+            // identity's grants then name the streams it may inspect.
+            Err(e)
+                if e == NO_JETSTREAM
+                    && restricted.is_some_and(|a| !a.named_streams(prefix).is_empty()) =>
+            {
+                let names = restricted
+                    .map(|a| a.named_streams(prefix))
+                    .unwrap_or_default();
+                (
+                    named_streams(client, prefix, names, deadline, &mut issues).await,
+                    false,
+                )
+            }
+            // JetStream disabled for the account, or nothing serving this API prefix, differs
+            // from a denied or timed-out request. Admin-style accounts often reach streams
+            // only through another profile's prefix.
+            Err(e) if e == NO_JETSTREAM => {
+                return Snapshot::unavailable(NO_JETSTREAM_VIEW, scope);
+            }
             Err(_) => {
                 return Snapshot::unavailable(
                     "JetStream inventory unavailable. Connectivity, permissions or JetStream configuration may be responsible.",
@@ -267,6 +299,60 @@ pub async fn observe_scoped(
         access,
         capabilities: None,
     }
+}
+
+pub fn account_prefix(account: &str) -> String {
+    format!("$JS.{account}.API")
+}
+
+// Each listed account is observed through its own prefix and merged with a label. An
+// account that answers with no JetStream is outside this login's reach and is skipped, so
+// identities without the administrator imports still see only their own account.
+pub async fn observe_accounts(
+    client: &async_nats::Client,
+    prefix: &str,
+    scope: &str,
+    access: Option<&crate::access::Access>,
+    accounts: &[String],
+) -> Snapshot {
+    let mut combined = observe_scoped(client, prefix, scope, access).await;
+    if accounts.is_empty() {
+        return combined;
+    }
+    let mut reached = combined.status != "unavailable";
+    if !reached && combined.issues.iter().any(|i| i == NO_JETSTREAM_VIEW) {
+        combined.issues.clear();
+        combined.status = "complete".into();
+    }
+    for account in accounts {
+        let mut other = observe_scoped(client, &account_prefix(account), scope, access).await;
+        if other.status == "unavailable" {
+            if !other.issues.iter().any(|i| i == NO_JETSTREAM_VIEW) {
+                combined
+                    .issues
+                    .extend(other.issues.iter().map(|i| format!("{account}: {i}")));
+                combined.status = "partial".into();
+            }
+            continue;
+        }
+        reached = true;
+        for item in other.streams.iter_mut().chain(other.consumers.iter_mut()) {
+            item["natsui_account"] = json!(account);
+        }
+        if other.status == "partial" && combined.status == "complete" {
+            combined.status = "partial".into();
+        }
+        combined
+            .issues
+            .extend(other.issues.iter().map(|i| format!("{account}: {i}")));
+        combined.streams.append(&mut other.streams);
+        combined.consumers.append(&mut other.consumers);
+    }
+    if !reached && combined.streams.is_empty() && combined.issues.is_empty() {
+        return Snapshot::unavailable(NO_JETSTREAM_VIEW, scope);
+    }
+    combined.observed_at = now();
+    combined
 }
 
 pub fn summarize(snapshot: &Snapshot, threshold: u64) -> Value {
@@ -456,6 +542,7 @@ mod tests {
             demo: false,
             prefix: "$JS.API".into(),
             scope: "integration".into(),
+            accounts: Default::default(),
         };
         let query = serde_json::from_value(json!({"subject":"orders.*","start":1})).unwrap();
         let page = crate::messages::browse(

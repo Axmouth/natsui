@@ -53,6 +53,8 @@ struct App {
     monitor: monitoring::Monitor,
     demo: bool,
     prefix: String,
+    // Other accounts reached through ADMIN-style imports at $JS.<account>.API
+    accounts: Arc<Vec<String>>,
     scope: String,
     connection: Option<connection::Config>,
     settings_cache: Arc<RwLock<store::Settings>>,
@@ -204,6 +206,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         } else {
             format!("$JS.{domain}.API")
         },
+        accounts: Arc::new(deployment::accounts()?),
         scope,
     };
     if !session_only {
@@ -497,6 +500,7 @@ fn application_routes(app: App) -> Router {
         .route("/api/messages/{stream}/{sequence}", get(messages::message))
         .route("/api/records/{stream}", get(messages::browse))
         .route("/api/latest/{stream}", get(messages::latest))
+        .route("/api/subjects/{stream}", get(messages::subjects))
         .route(
             "/subjects.js",
             get(|| async {

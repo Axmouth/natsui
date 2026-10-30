@@ -133,6 +133,46 @@ pub async fn message(
     ))
 }
 
+// STREAM.INFO with a subject filter reports per-subject record counts without reading any
+// payload, so listing stored subjects needs only the stream information grant.
+pub async fn subjects(
+    State(app): State<App>,
+    Path(stream): Path<String>,
+) -> Result<Json<Value>, Failure> {
+    inventory(&app, &stream).await?;
+    if app.demo {
+        return Ok(Json(
+            json!({"demo":true,"stream":stream,"observed_at":telemetry::now(),"total":0,"truncated":false,"subjects":[]}),
+        ));
+    }
+    let value = telemetry::request(
+        &client(&app).await?,
+        format!("{}.STREAM.INFO.{stream}", app.prefix),
+        json!({"subjects_filter":">"}),
+    )
+    .await
+    .map_err(|_| upstream("Stored subjects unavailable; check stream information permission"))?;
+    let mut subjects: Vec<(String, u64)> = value["state"]["subjects"]
+        .as_object()
+        .map(|all| {
+            all.iter()
+                .map(|(subject, count)| (subject.clone(), count.as_u64().unwrap_or(0)))
+                .collect()
+        })
+        .unwrap_or_default();
+    let total = value["total"]
+        .as_u64()
+        .filter(|n| *n > 0)
+        .unwrap_or(subjects.len() as u64);
+    subjects.sort();
+    let truncated = subjects.len() > 1000 || total > subjects.len() as u64;
+    subjects.truncate(1000);
+    Ok(Json(
+        json!({"demo":false,"stream":stream,"observed_at":telemetry::now(),"total":total,"truncated":truncated,
+            "subjects":subjects.into_iter().map(|(subject,records)|json!({"subject":subject,"records":records})).collect::<Vec<_>>()}),
+    ))
+}
+
 pub async fn latest(
     State(app): State<App>,
     Path(stream): Path<String>,

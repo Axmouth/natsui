@@ -189,6 +189,12 @@ Grant evaluation treats a wildcard requirement as permitted only when a single g
 
 When an identity has VARZ but not ROUTEZ, Replicas draws configured route peers from each server's node metrics. Configured addresses that do not match a server name are counted but not shown.
 
+### Several accounts in one view
+
+NATSUI_ACCOUNTS lists account labels reached at `$JS.<label>.API`, and a profile can set `accounts` to the same list. An administrator account typically imports each account's JetStream API under that prefix, for example `{ service: { account: SYSTEM1, subject: "$JS.API.>" }, to: "$JS.system1.API.>" }`. Collection then merges the signed-in account with every listed account and labels each stream and consumer with its account. The browser addresses such resources as `account/stream`, and requests about one resource carry an `X-Natsui-Account` header so reads and operations use that account's prefix. Accounts that answer with no JetStream are skipped, so identities without the imports keep seeing only their own account. An identity can see a single stream shared from another account when its grants name `$JS.<label>.API.STREAM.INFO.<stream>` and the owning account exports that stream's read requests.
+
+Subjects lists stored subjects per stream with record counts, read through STREAM.INFO with a subject filter, so it needs only the stream information grant. Monitoring inventories are offered only after a server answers them at sign-in. Connection lists requested from an application account are scoped by NATS to that account.
+
 ### Failure watch
 
 Activity contains a stream selector and Start failure watch. The watch stops starting new windows when the page changes, the tab becomes hidden or Stop watch is selected. An in-flight window can finish within eight seconds. There is a short gap between windows, and events outside active windows cannot be recovered. Silence does not prove subscription permission or absence of failures. Advisory subjects can also receive application publications, so events are signals for investigation, not authoritative audit records or a dead-letter queue.

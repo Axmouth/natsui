@@ -32,6 +32,8 @@ pub(crate) struct Profile {
     #[serde(default)]
     pub(crate) domain: String,
     #[serde(default)]
+    pub(crate) accounts: Vec<String>,
+    #[serde(default)]
     pub(crate) monitor_urls: Vec<String>,
     pub(crate) monitor_config_file: Option<String>,
     #[serde(default)]
@@ -90,6 +92,8 @@ pub(crate) fn definitions() -> Result<Vec<Profile>, Box<dyn std::error::Error>> 
             || profile.name.is_empty()
             || profile.name.len() > 128
             || (!profile.domain.is_empty() && !telemetry::valid_token(&profile.domain))
+            || crate::deployment::parse_accounts(&profile.accounts.join(","))
+                .map_or(true, |parsed| parsed.len() != profile.accounts.len())
         {
             return Err("Invalid or duplicate profile identity".into());
         }
@@ -165,6 +169,7 @@ pub async fn router(
                     format!("$JS.{}.API", profile.domain)
                 },
                 scope: profile.name.clone(),
+                accounts: Arc::new(profile.accounts.clone()),
                 connection: Some(connection),
             };
             if !base.auth.nats_policy().session_only {

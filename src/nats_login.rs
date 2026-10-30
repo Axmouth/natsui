@@ -232,7 +232,8 @@ pub fn allowed(method: &Method, path: &str, policy: Policy) -> bool {
             | ["", "api", "buckets", _, _, "entry"]
             | ["", "api", "messages", _, _]
             | ["", "api", "records", _]
-            | ["", "api", "latest", _] => true,
+            | ["", "api", "latest", _]
+            | ["", "api", "subjects", _] => true,
             ["", "api", "activity" | "watch"] => policy.session_only,
             ["", "api", "history"]
             | ["", "api", "history", "window" | "backlog"]
@@ -297,6 +298,22 @@ fn url_page(query: &str) -> Result<usize, ()> {
     }
     Ok(0)
 }
+// Requests about one resource follow the account named by the browser. Inventory, history
+// and monitoring always cover every configured account.
+fn routes_by_account(path: &str) -> bool {
+    [
+        "/api/messages/",
+        "/api/records/",
+        "/api/latest/",
+        "/api/subjects/",
+        "/api/operations/",
+        "/api/config",
+        "/api/buckets",
+        "/api/watch",
+    ]
+    .iter()
+    .any(|p| path.starts_with(p))
+}
 fn needs_inventory(path: &str) -> bool {
     matches!(path, "/api/snapshot" | "/api/buckets")
 }
@@ -325,6 +342,19 @@ pub async fn dispatch(mut app: App, session: Arc<Session>, request: Request) -> 
         Ok(client) => client,
         Err(_) => return (StatusCode::BAD_GATEWAY, "NATS authentication or connectivity is unavailable. No collector credentials were used.").into_response(),
     };
+    if let Some(account) = request
+        .headers()
+        .get("x-natsui-account")
+        .and_then(|v| v.to_str().ok())
+        .filter(|v| !v.is_empty())
+    {
+        if !app.accounts.iter().any(|a| a == account) {
+            return (StatusCode::BAD_REQUEST, "Unknown account for this profile").into_response();
+        }
+        if routes_by_account(&path) {
+            app.prefix = telemetry::account_prefix(account);
+        }
+    }
     let monitoring_choice = *session.tools.monitoring.lock().await;
     let session_monitoring = policy.session_only && monitoring_choice.enabled;
     if policy.session_only
@@ -398,7 +428,13 @@ pub async fn dispatch(mut app: App, session: Arc<Session>, request: Request) -> 
     } else if needs_inventory(&path) {
         tokio::time::timeout(
             Duration::from_secs(20),
-            telemetry::observe_scoped(&client, &app.prefix, &app.scope, session.access.as_ref()),
+            telemetry::observe_accounts(
+                &client,
+                &app.prefix,
+                &app.scope,
+                session.access.as_ref(),
+                &app.accounts,
+            ),
         )
         .await
         .unwrap_or_else(|_| {
@@ -411,7 +447,7 @@ pub async fn dispatch(mut app: App, session: Arc<Session>, request: Request) -> 
         )
     };
     if cached.is_none() && needs_inventory(&path) {
-        state.capabilities = Some(crate::access::capabilities(
+        state.capabilities = Some(crate::access::capabilities_by_account(
             session.access.as_ref(),
             &app.prefix,
             &state.streams,

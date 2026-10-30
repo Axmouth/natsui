@@ -2,16 +2,16 @@
 'use strict';
 const workspaceState={events:[],eventError:null,connections:null,subscriptions:null,connectionRates:new Map(),loading:{},previousConnections:null};
 Object.assign(pages,{investigate:['Investigate','Compare consumer progress, node resources and recorded events at the same time.'],subjects:['Subjects','Configured capture, consumer eligibility and observed subscription interest.'],replicas:['Replica placement','Stream leaders and replication state across nodes.'],connections:['Connections','Client traffic and subscription context across configured nodes.'],consumer:['Consumer detail','Pending delivery, acknowledgment pressure and progress over time.']});
-function consumerIdentity(c){return {name:c.name,stream:c.stream_name,created:c.created??null,stream_created:data.snapshot.streams.find(s=>s.config.name===c.stream_name)?.created??null};}
-function consumerUrl(c){return '#consumer?'+new URLSearchParams({stream:c.stream_name,name:c.name});}
+function consumerIdentity(c){return {name:c.name,stream:c.stream_name,created:c.created??null,stream_created:findStream(consumerStreamId(c))?.created??null};}
+function consumerUrl(c){return '#consumer?'+new URLSearchParams({stream:consumerStreamId(c),name:c.name});}
 function renderConsumer(){
  if(currentPage()!=='consumer')return;
- const c=data.snapshot.consumers.find(c=>c.name===filters().get('name')&&c.stream_name===filters().get('stream'));
+ const c=data.snapshot.consumers.find(c=>c.name===filters().get('name')&&consumerStreamId(c)===filters().get('stream'));
  if(!c){empty('consumer-summary','Consumer is not in the observed inventory.');$('consumer-charts').replaceChildren();delete $('consumer-charts').dataset.key;return;}
  $('page-title').textContent=c.name;const host=$('consumer-summary'),key=JSON.stringify(consumerIdentity(c)),open=host.dataset.key===key&&host.querySelector('details')?.open;host.dataset.key=key;
  const identity=consumerIdentity(c),points=resourceSeries('consumer',identity,'pending'),direction=NatsuiTrends.direction(points,data.settings.refresh_seconds),slope=direction?.rate??null;
  host.replaceChildren(element('h2',`${c.stream_name} / ${c.name}`));const grid=element('div',null,'detail-grid');for(const [label,value]of [['Pending delivery',number(c.num_pending)],['Awaiting acknowledgment',number(c.num_ack_pending)],['Ack capacity used',percent(c.num_ack_pending,c.config?.max_ack_pending)||'No finite limit reported'],['Backlog direction',slope==null?'Collecting history':Math.abs(slope)<.1?'Approximately steady':`${slope>0?'Growing':'Draining'} ${number(Math.abs(Math.round(slope)))}/s over ${direction.seconds}s`]]){const card=element('div');card.append(element('span',label),element('strong',value));grid.append(card);}host.append(grid,element('p',`Filters: ${NatsuiSubjects.filters(c).join(', ')}. Waiting pull requests: ${number(c.num_waiting)}. These are requests, not a worker count.`));
- const link=element('a','Browse matching retained records');link.href='#messages?'+new URLSearchParams({stream:c.stream_name,subject:NatsuiSubjects.filters(c)[0]});const stream=element('a','Open stream');stream.href='#stream?name='+encodeURIComponent(c.stream_name);const links=element('div',null,'view-links');links.append(link,stream);host.append(links);
+ const link=element('a','Browse matching retained records');link.href='#messages?'+new URLSearchParams({stream:consumerStreamId(c),subject:NatsuiSubjects.filters(c)[0]});const stream=element('a','Open stream');stream.href='#stream?name='+encodeURIComponent(consumerStreamId(c));const links=element('div',null,'view-links');links.append(link,stream);host.append(links);
  const config=element('details');config.open=!!open;config.append(element('summary','Reported configuration'),element('pre',JSON.stringify(c.config,null,2)));host.append(config);
  resourceCharts('consumer-charts',key,[{field:'pending',label:'Pending delivery',points:resourceSeries('consumer',identity,'pending')},{field:'ack_pending',label:'Awaiting acknowledgment',points:resourceSeries('consumer',identity,'ack_pending'),note:'Outstanding acknowledgments are separate from pending delivery and business completion.'},{field:'redelivered',label:'Currently tracked redelivered messages',points:resourceSeries('consumer',identity,'redelivered'),note:'Current count, not a lifetime redelivery counter.'},{field:'delivered',label:'Delivery attempts / second',points:resourceSeries('consumer',identity,'delivered',true),note:'Consumer sequence progress includes redeliveries. Resets and collection gaps break the rate.'}]);
 }
@@ -26,8 +26,25 @@ $('incident-search').oninput=renderIncidents;
 globalThis.NatsuiWorkspace={chartEvents,openIncident};
 
 function resourceLink(label,url){const a=element('a',label,'name-button');a.href=url;return a;}
+// Stored subjects are read on demand per stream and kept until a refresh or 30 seconds pass.
+const storedSubjects={at:0,loading:false,rows:[]};
+async function loadStoredSubjects(){
+ if(storedSubjects.loading||!data?.snapshot)return;storedSubjects.loading=true;$('load-stored-subjects').disabled=true;
+ const streams=data.snapshot.streams.filter(s=>!/^KV_|^OBJ_/.test(s.config.name)).slice(0,30),rows=[],notes=[];
+ $('stored-subjects-status').textContent=`Reading subjects from ${streams.length} ${streams.length===1?'stream':'streams'}...`;
+ for(const s of streams){try{const result=await api(`/api/subjects/${encodeURIComponent(streamId(s))}`);for(const r of result.subjects)rows.push({...r,stream:streamId(s)});if(result.truncated)notes.push(`${streamId(s)} lists the first 1,000 of ${number(result.total)}`);}catch(error){notes.push(`${streamId(s)}: ${error.message}`);}}
+ storedSubjects.rows=rows.sort((a,b)=>a.subject.localeCompare(b.subject)||a.stream.localeCompare(b.stream));storedSubjects.at=Date.now();storedSubjects.loading=false;$('load-stored-subjects').disabled=false;
+ $('stored-subjects-status').textContent=`${number(rows.length)} stored ${rows.length===1?'subject':'subjects'} at ${new Date().toLocaleTimeString()}.${notes.length?' '+notes.join('. ')+'.':''}`;
+ renderStoredSubjects();
+}
+function renderStoredSubjects(){
+ const host=$('stored-subjects');if(!storedSubjects.rows.length){host.replaceChildren();return;}
+ host.replaceChildren(table([['Subject'],['Stream'],['Records',true]],storedSubjects.rows.slice(0,500).map(r=>{const name=cell();name.append(resourceLink(r.subject,'#subjects?'+new URLSearchParams({q:r.subject})));const stream=cell();stream.append(resourceLink(r.stream,'#stream?name='+encodeURIComponent(r.stream)));return [name,stream,cell(number(r.records),true)];})));
+}
+$('load-stored-subjects').onclick=loadStoredSubjects;
 function renderSubjects(){
- if(currentPage()!=='subjects')return;const subject=$('subject-query').value.trim(),host=$('subject-results');
+ if(currentPage()!=='subjects')return;
+ if(!staticDemo&&!storedSubjects.loading&&Date.now()-storedSubjects.at>30000)loadStoredSubjects();const subject=$('subject-query').value.trim(),host=$('subject-results');
  const examples=$('demo-subject-examples');
  if(staticDemo){
   examples.hidden=false;$('subscriptions-heading').textContent='Simulated subscriptions';
@@ -41,9 +58,9 @@ function renderSubjects(){
  renderSubscriptions();
  if(!subject){host.replaceChildren(element('p',staticDemo?'Choose a sample above or enter a literal subject. The subscription inventory below covers all demo subjects.':'Enter a subject to see configured matches.'));return;}
  if(!NatsuiSubjects.valid(subject)||/[*>]/.test(subject)){host.replaceChildren(element('p','Enter a literal subject, such as orders.created. Wildcards belong in the configured filters.','issue'));return;}
- const streams=data.snapshot.streams.filter(s=>(s.config.subjects||[]).some(f=>NatsuiSubjects.matches(f,subject))),consumers=data.snapshot.consumers.filter(c=>streams.some(s=>s.config.name===c.stream_name)&&NatsuiSubjects.filters(c).some(f=>NatsuiSubjects.matches(f,subject)));
+ const streams=data.snapshot.streams.filter(s=>(s.config.subjects||[]).some(f=>NatsuiSubjects.matches(f,subject))),consumers=data.snapshot.consumers.filter(c=>streams.some(s=>streamId(s)===consumerStreamId(c))&&NatsuiSubjects.filters(c).some(f=>NatsuiSubjects.matches(f,subject)));
  const panels=element('div',null,'subject-context'),left=element('section'),right=element('section');left.append(element('h3',`${streams.length} configured capturing streams`));
- for(const s of streams){const row=element('p');row.append(resourceLink(s.config.name,'#stream?name='+encodeURIComponent(s.config.name)),element('span',' / '+s.config.subjects.filter(f=>NatsuiSubjects.matches(f,subject)).join(', ')+' / '),resourceLink('Inspect storage','#messages?'+new URLSearchParams({stream:s.config.name,subject})));left.append(row);}
+ for(const s of streams){const row=element('p');row.append(resourceLink(streamId(s),'#stream?name='+encodeURIComponent(streamId(s))),element('span',' / '+s.config.subjects.filter(f=>NatsuiSubjects.matches(f,subject)).join(', ')+' / '),resourceLink('Inspect storage','#messages?'+new URLSearchParams({stream:s.config.name,subject})));left.append(row);}
  if(!streams.length)left.append(element('p','No configured capture match in the observed inventory. Mirrors and sources can retain messages without a local capture rule.'));
  right.append(element('h3',`${consumers.length} matching consumers on capturing streams`));for(const c of consumers){const row=element('p');row.append(resourceLink(c.name,consumerUrl(c)),element('span',` / ${c.stream_name} / ${NatsuiSubjects.filters(c).filter(f=>NatsuiSubjects.matches(f,subject)).join(', ')}`));right.append(row);}if(!consumers.length)right.append(element('p','No matching consumer filters observed.'));
  panels.append(left,right);host.replaceChildren(panels,element('p',`Inventory observed ${new Date(data.snapshot.observed_at*1000).toLocaleTimeString()} / ${data.snapshot.status}. Matches do not prove a message was stored or delivered.`,'panel-note'));renderSubscriptions();
@@ -64,7 +81,7 @@ function renderReplicas(){
  if(currentPage()!=='replicas')return;const streams=data.snapshot.streams,nodes=data.monitoring?.nodes||[];
  const names=[...new Set([...nodes.map(n=>n.server_name).filter(Boolean),...streams.flatMap(s=>[s.cluster?.leader,...(s.cluster?.replicas||[]).map(r=>r.name)]).filter(Boolean)])].sort();
  if(!streams.length){empty('replica-matrix','No observed stream placement.');return;}
- const rows=streams.map(s=>{const first=cell();first.append(resourceLink(s.config.name,'#stream?name='+encodeURIComponent(s.config.name)),element('span',`${s.config.num_replicas} configured replicas / ${s.cluster?.name||'cluster not reported'}`,'secondary'));return [first,...names.map(name=>{const td=cell();if(s.cluster?.leader===name)td.append(badge('Leader','good'));else{const peer=s.cluster?.replicas?.find(r=>r.name===name);if(peer){td.append(badge(peer.offline?'Offline':peer.current?'Current':'Behind',peer.offline||!peer.current?'warn':'good'));if(peer.lag!=null)td.append(element('span',`Lag ${number(peer.lag)}`,'secondary'));if(peer.active!=null)td.title=`Time since last peer activity: ${(peer.active/1e9).toFixed(3)} seconds`;}else td.append(element('span','Not reported','secondary'));}return td;})];});
+ const rows=streams.map(s=>{const first=cell();first.append(resourceLink(streamId(s),'#stream?name='+encodeURIComponent(streamId(s))),element('span',`${s.config.num_replicas} configured replicas / ${s.cluster?.name||'cluster not reported'}`,'secondary'));return [first,...names.map(name=>{const td=cell();if(s.cluster?.leader===name)td.append(badge('Leader','good'));else{const peer=s.cluster?.replicas?.find(r=>r.name===name);if(peer){td.append(badge(peer.offline?'Offline':peer.current?'Current':'Behind',peer.offline||!peer.current?'warn':'good'));if(peer.lag!=null)td.append(element('span',`Lag ${number(peer.lag)}`,'secondary'));if(peer.active!=null)td.title=`Time since last peer activity: ${(peer.active/1e9).toFixed(3)} seconds`;}else td.append(element('span','Not reported','secondary'));}return td;})];});
  setTable('replica-matrix',table([['Stream'],...names.map(n=>[n])],rows));
 }
 function renderConnections(){

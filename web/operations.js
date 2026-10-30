@@ -6,15 +6,16 @@
   const form = $('operation-form'),
     review = $('operation-review'),
     status = $('operation-status');
-  const send = (path, body) =>
-    api(path, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Natsui-Request': '1',
-      },
-      body: JSON.stringify(body),
-    });
+  // An account/stream name routes the operation to that account's API prefix.
+  const send = (path, body, account) => {
+    const headers = {
+      'Content-Type': 'application/json',
+      'X-Natsui-Request': '1',
+    };
+    if (account) headers['X-Natsui-Account'] = account;
+    return api(path, { method: 'POST', headers, body: JSON.stringify(body) });
+  };
+  let reviewedAccount = '';
   function reset() {
     preview = null;
     review.hidden = true;
@@ -43,11 +44,11 @@
           (s) =>
             action === 'create_stream' ||
             action.endsWith('consumer') && action !== 'create_consumer' ||
-            NatsuiAccess.action(action, s.config.name) !== false,
+            NatsuiAccess.action(action, streamId(s)) !== false,
         )
         .map((s) => {
           const o = element('option');
-          o.value = s.config.name;
+          o.value = streamId(s);
           return o;
         }),
     );
@@ -131,7 +132,13 @@
         payload: $('operation-payload').value,
       });
     try {
-      preview = await send('/api/operations/preview', p);
+      const target = splitStream(p.stream);
+      preview = await send(
+        '/api/operations/preview',
+        { ...p, stream: target.name },
+        target.account,
+      );
+      reviewedAccount = target.account;
       $('operation-warning').textContent = preview.warning;
       $('operation-details').textContent = JSON.stringify(
         preview.record
@@ -156,10 +163,11 @@
     working = true;
     $('operation-apply').disabled = true;
     try {
-      const result = await send('/api/operations/apply', {
-        token: preview.token,
-        confirmation: $('operation-confirm').value,
-      });
+      const result = await send(
+        '/api/operations/apply',
+        { token: preview.token, confirmation: $('operation-confirm').value },
+        reviewedAccount,
+      );
       reset();
       status.textContent =
         result.purged != null

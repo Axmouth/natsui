@@ -21,6 +21,26 @@ pub fn domain() -> Result<String, String> {
     Ok(domain)
 }
 
+// Account labels reached at $JS.<label>.API, typically through an administrator account's
+// prefixed service imports of each account's JetStream API.
+pub fn accounts() -> Result<Vec<String>, String> {
+    parse_accounts(&std::env::var("NATSUI_ACCOUNTS").unwrap_or_default())
+}
+pub fn parse_accounts(value: &str) -> Result<Vec<String>, String> {
+    let mut accounts: Vec<String> = value
+        .split(',')
+        .map(str::trim)
+        .filter(|a| !a.is_empty())
+        .map(str::to_owned)
+        .collect();
+    if accounts.len() > 32 || accounts.iter().any(|a| !crate::telemetry::valid_token(a)) {
+        return Err("NATSUI_ACCOUNTS must list up to 32 single-token account labels".into());
+    }
+    accounts.sort();
+    accounts.dedup();
+    Ok(accounts)
+}
+
 pub fn history_budget() -> Result<usize, String> {
     let mb: usize = std::env::var("NATSUI_HISTORY_MAX_MB")
         .unwrap_or("128".into())
@@ -30,4 +50,18 @@ pub fn history_budget() -> Result<usize, String> {
         return Err("NATSUI_HISTORY_MAX_MB must be between 16 and 4096".into());
     }
     Ok(mb * 1024 * 1024)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn account_lists_are_single_tokens() {
+        assert_eq!(
+            super::parse_accounts(" system2, system1,,system1 ").unwrap(),
+            ["system1", "system2"]
+        );
+        assert!(super::parse_accounts("bad.name").is_err());
+        assert!(super::parse_accounts("a b").is_err());
+        assert!(super::parse_accounts("").unwrap().is_empty());
+    }
 }

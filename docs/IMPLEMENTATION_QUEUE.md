@@ -49,3 +49,6 @@ Scoped access, the capability overview and record management shipped in v0.2.0. 
 - [ ] Further management parity: stream configuration edits (limits, retention, replicas), consumer configuration edits and consumer creation options beyond durable pull, each gated by its grants.
 - [ ] Show the dashboard identity name for dashboard-key and OIDC sessions alongside the NATS username shown in the top bar.
 - [ ] Publish a sfdev permission template: per-system users with USER.INFO and VARZ, denied stream listing, and exact grants for requests without trailing tokens.
+- [ ] Account-aware history and incident identities, so equal stream names in different accounts keep separate trends.
+- [ ] Administrator connection lists per account through an exported `$SYS.REQ.ACCOUNT.*.CONNZ`, labeled like streams.
+- [ ] Readability pass over the dense browser scripts: split long one-line functions, name intermediate values, and add JSDoc types checked with `tsc --checkJs` so the asset-only build stays.

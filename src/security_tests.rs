@@ -305,6 +305,7 @@ async fn reviewed_configuration_edits() {
         demo: false,
         prefix: "$JS.API".into(),
         scope: "test".into(),
+        accounts: Default::default(),
     };
     let (code, loaded) = call(
         &app,
@@ -707,6 +708,7 @@ async fn native_lifecycle_publish_and_bucket_reads() {
         demo: false,
         prefix: "$JS.API".into(),
         scope: "test".into(),
+        accounts: Default::default(),
     };
     let created=operation(&app,json!({"action":"create_stream","stream":"CREATED","config":{"subjects":["created.>"],"storage":"memory","retention":"limits","num_replicas":1,"max_msgs":100}})).await;
     assert_eq!(created["verified"], true);

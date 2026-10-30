@@ -78,6 +78,7 @@ pub struct Access {
     restricted: bool,
     publish: Rules,
     nodes: bool,
+    inventories: Vec<&'static str>,
 }
 
 pub fn matches(pattern: &str, subject: &str) -> bool {
@@ -114,6 +115,7 @@ impl Access {
                 .map(|p| Rules::from(&p["publish"]))
                 .unwrap_or_default(),
             nodes: false,
+            inventories: vec![],
         })
     }
     pub fn restricted(&self) -> bool {
@@ -143,7 +145,10 @@ impl Access {
     // CONNZ, SUBSZ and ROUTEZ describe other identities' clients and interest, so each is
     // offered only with its own grant, even when node metrics are available.
     pub fn monitors(&self, subject: &str) -> bool {
-        self.nodes && self.can(subject)
+        let endpoint = subject.rsplit('.').next().unwrap_or_default();
+        self.nodes
+            && self.can(subject)
+            && (endpoint == "VARZ" || self.inventories.contains(&endpoint))
     }
     // Streams named literally in STREAM.INFO grants. Wildcard grants cannot be enumerated
     // without STREAM.LIST, so they are only honoured as a filter on a listed inventory.
@@ -268,6 +273,48 @@ pub fn capabilities(
     json!({"known":access.is_some(),"restricted":access.map(|a| a.restricted),"cluster":cluster,"streams":streams,"consumers":consumers})
 }
 
+// Streams merged from other accounts carry natsui_account and are evaluated against that
+// account's API prefix. Cluster capabilities describe the profile's own account.
+pub fn capabilities_by_account(
+    access: Option<&Access>,
+    prefix: &str,
+    streams: &[Value],
+    consumers: &[Value],
+) -> Value {
+    let account = |v: &Value| v["natsui_account"].as_str().map(str::to_owned);
+    let mut labels: Vec<Option<String>> = streams.iter().map(account).collect();
+    labels.sort();
+    labels.dedup();
+    let mut result = capabilities(access, prefix, &[], &[]);
+    for label in labels {
+        let own: Vec<Value> = streams
+            .iter()
+            .filter(|s| account(s) == label)
+            .cloned()
+            .collect();
+        let theirs: Vec<Value> = consumers
+            .iter()
+            .filter(|c| account(c) == label)
+            .cloned()
+            .collect();
+        let prefix = label
+            .as_deref()
+            .map(crate::telemetry::account_prefix)
+            .unwrap_or_else(|| prefix.to_owned());
+        let part = capabilities(access, &prefix, &own, &theirs);
+        for key in ["streams", "consumers"] {
+            let items = part[key].as_array().cloned().unwrap_or_default();
+            if let Some(target) = result[key].as_array_mut() {
+                target.extend(items.into_iter().map(|mut item| {
+                    item["account"] = json!(label);
+                    item
+                }));
+            }
+        }
+    }
+    result
+}
+
 pub async fn discover(client: &async_nats::Client) -> Option<Access> {
     let reply = tokio::time::timeout(Duration::from_secs(2), client.request(USER_INFO, "".into()))
         .await
@@ -277,18 +324,28 @@ pub async fn discover(client: &async_nats::Client) -> Option<Access> {
     if access.can(NODE_MONITORING) {
         access.nodes = reaches_nodes(client).await;
     }
+    // Each inventory needs its own import as well as a grant, so a granted one is offered
+    // only after a server answers it once.
+    if access.nodes {
+        for endpoint in ["CONNZ", "SUBSZ", "ROUTEZ"] {
+            let subject = format!("$SYS.REQ.SERVER.PING.{endpoint}");
+            if access.can(&subject) && answers(client, subject, "{\"limit\":1}").await {
+                access.inventories.push(endpoint);
+            }
+        }
+    }
     Some(access)
 }
 
-pub async fn reaches_nodes(client: &async_nats::Client) -> bool {
+async fn answers(client: &async_nats::Client, subject: String, body: &'static str) -> bool {
     matches!(
-        tokio::time::timeout(
-            Duration::from_secs(1),
-            client.request(NODE_MONITORING, "".into())
-        )
-        .await,
+        tokio::time::timeout(Duration::from_secs(1), client.request(subject, body.into())).await,
         Ok(Ok(_))
     )
+}
+
+pub async fn reaches_nodes(client: &async_nats::Client) -> bool {
+    answers(client, NODE_MONITORING.to_owned(), "").await
 }
 
 #[cfg(test)]
@@ -355,6 +412,12 @@ mod tests {
         assert!(access.monitors(NODE_MONITORING));
         assert!(!access.monitors("$SYS.REQ.SERVER.PING.CONNZ"));
         assert!(!access.monitors("$SYS.REQ.SERVER.NABC.CONNZ"));
+        let mut open = Access::parse(&json!({"data":{"user":"admin","account":"ADMIN"}})).unwrap();
+        open.nodes = true;
+        assert!(!open.monitors("$SYS.REQ.SERVER.PING.CONNZ"));
+        open.inventories.push("CONNZ");
+        assert!(open.monitors("$SYS.REQ.SERVER.PING.CONNZ"));
+        assert!(open.monitors("$SYS.REQ.SERVER.NABC.CONNZ"));
         let summary = access.summary("$JS.API", &[]);
         assert_eq!(summary["monitoring"], true);
         assert_eq!(summary["connections"], false);
@@ -403,6 +466,43 @@ mod tests {
         let unknown = capabilities(None, "$JS.API", &streams, &[]);
         assert_eq!(unknown["known"], false);
         assert!(unknown["cluster"][0]["granted"].is_null());
+    }
+
+    #[test]
+    fn merged_streams_are_evaluated_against_their_account_prefix() {
+        let access = Access::parse(&json!({"data":{"user":"system2","account":"SYSTEM2","permissions":{"publish":{
+            "allow":["$JS.API.STREAM.INFO.alerts","$JS.API.STREAM.PURGE.alerts","$JS.system3.API.STREAM.INFO.events","$JS.system3.API.STREAM.MSG.GET.events"]}}}}))
+        .unwrap();
+        let streams = [
+            json!({"config":{"name":"alerts","subjects":["alerts.>"]}}),
+            json!({"config":{"name":"events","subjects":["events.>"]},"natsui_account":"system3"}),
+        ];
+        let caps = capabilities_by_account(Some(&access), "$JS.API", &streams, &[]);
+        let find = |stream: &str, id: &str| {
+            let entry = caps["streams"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|s| s["stream"] == stream)
+                .unwrap();
+            (
+                entry["account"].clone(),
+                entry["capabilities"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|c| c["id"] == id)
+                    .unwrap()["granted"]
+                    .clone(),
+            )
+        };
+        assert_eq!(find("alerts", "purge"), (Value::Null, json!(true)));
+        assert_eq!(
+            find("events", "read_messages"),
+            (json!("system3"), json!(true))
+        );
+        assert_eq!(find("events", "purge"), (json!("system3"), json!(false)));
+        assert_eq!(access.named_streams("$JS.system3.API"), vec!["events"]);
     }
 
     #[test]

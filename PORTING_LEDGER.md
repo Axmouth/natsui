@@ -382,3 +382,9 @@ Added beyond Fibril, adapting the RabbitMQ management pattern of offering resour
 Limitations: capability evaluation does not combine several partial grants, and grants naming individual consumers are reported as not covering consumer creation in general. Republish targets the source stream only. Verified with an integration test covering republish headers, record deletion, filtered purge, capability requirements and a refused purge for an ungranted identity, plus the UI contract and smoke scripts and a manual check on the local cluster.
 
 The top bar shows the signed-in NATS username for NATS login sessions.
+
+## Multiple accounts and stored subjects, 2026-10-30
+
+A profile can list additional accounts reached through prefixed JetStream API imports. Session collection merges them into one labeled inventory, capabilities are evaluated per account prefix, and resource reads and operations route through the account named by the browser. Accounts without JetStream for the login are skipped, and a single shared stream is found through an explicit STREAM.INFO grant under its account prefix. A missing JetStream now reports its cause instead of a generic failure. Subjects lists stored subjects with record counts. Monitoring inventories are offered only after a server answers them at sign-in.
+
+Limitations: history and incident identities use stream and consumer names without the account label, so equal names in two accounts share a trend line. Administrator connection lists show the administrator account only. The per-account connection request can be exported to an administrator account but is not used yet. Verified on a local multi-account cluster with SYSTEM1 to SYSTEM3, an ADMIN account and a shared stream.

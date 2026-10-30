@@ -1049,6 +1049,7 @@ mod tests {
             demo: true,
             prefix: "$JS.API".into(),
             scope: "auth-test".into(),
+            accounts: Default::default(),
             connection: None,
             settings_cache: Arc::new(RwLock::new(crate::store::Settings::default())),
         };

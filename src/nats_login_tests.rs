@@ -130,6 +130,7 @@ async fn router_config(
         demo: false,
         prefix: "$JS.API".into(),
         scope: "collector".into(),
+        accounts: Default::default(),
         connection: Some(config),
         settings_cache: Arc::new(RwLock::new(store::Settings::default())),
     };

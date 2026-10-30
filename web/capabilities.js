@@ -31,8 +31,10 @@ const NatsuiAccess = (() => {
   function list(stream, consumer) {
     const c = capabilities();
     if (!c) return null;
-    if (consumer) return c.consumers.find((x) => x.stream === stream && x.consumer === consumer)?.capabilities || null;
-    if (stream) return c.streams.find((x) => x.stream === stream)?.capabilities || null;
+    const { account, name } = splitStream(stream);
+    const same = (x) => x.stream === name && (x.account || '') === account;
+    if (consumer) return c.consumers.find((x) => same(x) && x.consumer === consumer)?.capabilities || null;
+    if (stream) return c.streams.find(same)?.capabilities || null;
     return c.cluster;
   }
   // true or false when known, null when this login's grants are unknown.
@@ -50,7 +52,7 @@ const NatsuiAccess = (() => {
       const c = capabilities();
       if (!c) return writes() ? null : false;
       const pools = id.endsWith('consumer') && id !== 'create_consumer' ? c.consumers : c.streams;
-      const states = pools.map((p) => allowed(id, p.stream, p.consumer));
+      const states = pools.map((p) => allowed(id, p.account ? `${p.account}/${p.stream}` : p.stream, p.consumer));
       return states.includes(true) ? true : states.length && states.every((s) => s === false) ? false : writes() ? null : false;
     }
     return allowed(id, stream, id.endsWith('consumer') && id !== 'create_consumer' ? consumer : undefined);
@@ -149,9 +151,9 @@ const NatsuiAccess = (() => {
     parts.push(element('h3', 'Cluster'), capabilityTable(c.cluster));
     for (const s of c.streams) {
       const d = element('details');
-      d.dataset.key = 'stream:' + s.stream;
+      d.dataset.key = 'stream:' + (s.account || '') + '/' + s.stream;
       d.open = open.has(d.dataset.key) || c.streams.length === 1;
-      d.append(element('summary', `Stream ${s.stream}`), capabilityTable(s.capabilities));
+      d.append(element('summary', `Stream ${s.account ? s.account + '/' : ''}${s.stream}`), capabilityTable(s.capabilities));
       parts.push(d);
     }
     if (c.consumers.length) {
@@ -159,7 +161,7 @@ const NatsuiAccess = (() => {
       d.dataset.key = 'consumers';
       d.open = open.has('consumers');
       d.append(element('summary', `Consumers (${c.consumers.length})`));
-      for (const x of c.consumers) d.append(element('h3', `${x.stream} / ${x.consumer}`), capabilityTable(x.capabilities));
+      for (const x of c.consumers) d.append(element('h3', `${x.account ? x.account + '/' : ''}${x.stream} / ${x.consumer}`), capabilityTable(x.capabilities));
       parts.push(d);
     }
     host.replaceChildren(...parts);

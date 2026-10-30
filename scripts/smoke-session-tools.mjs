@@ -30,6 +30,9 @@ try {
   const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
   async function login(user){await page.goto(base);await page.locator('#nats-username').fill(user);await page.locator('#nats-password').fill('secret');await page.getByRole('button',{name:'Sign in with NATS',exact:true}).click();await page.waitForURL(base+'/');await page.waitForFunction(()=>data?.dashboard?.session_history);}
   await login('writer');
+  await page.goto(base+'/#subjects');
+  await page.locator('#subject-form').waitFor({state:'visible'});
+  assert.equal(await page.locator('#live-subscriptions').isHidden(),true,'Subscriptions stay hidden without access');
   await page.goto(base+'/#nodes');
   await page.getByRole('button',{name:'Enable monitoring through NATS',exact:true}).waitFor();
   assert.match(await page.locator('#nodes-table').textContent(),/monitoring is off/);
