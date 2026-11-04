@@ -70,7 +70,7 @@ async function operation(action, configure, confirmation) {
   await configure();
   await page.locator('#operation-preview').click();
   await page.locator('#operation-review').waitFor({ state: 'visible' });
-  await page.locator('#operation-confirm').fill(confirmation);
+  if (/^(purge|delete)_/.test(action)) await page.locator('#operation-confirm').fill(confirmation);
   const applied = page.waitForResponse((response) =>
     response.url().endsWith('/api/operations/apply'),
   );

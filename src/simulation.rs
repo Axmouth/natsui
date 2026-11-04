@@ -80,6 +80,7 @@ pub fn snapshot(scope: &str, elapsed: u64) -> Snapshot {
         ),
         access: None,
         capabilities: None,
+        listed: Vec::new(),
     }
 }
 

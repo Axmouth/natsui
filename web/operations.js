@@ -16,6 +16,7 @@
     return api(path, { method: 'POST', headers, body: JSON.stringify(body) });
   };
   let reviewedAccount = '';
+  const TYPED = ['purge_stream', 'delete_message', 'delete_stream', 'delete_consumer'];
   function reset() {
     preview = null;
     review.hidden = true;
@@ -34,6 +35,44 @@
       action !== 'publish' || $('operation-mode').value === 'jetstream';
     $('operation-consumer').required = action.endsWith('consumer');
     streams(action);
+    accounts(action);
+    hints();
+  }
+  // Subject hints come from the chosen stream's captured subjects.
+  function hints() {
+    const name = $('operation-stream').value.trim();
+    const stream = name && data?.snapshot ? findStream(name) : null;
+    const hint = stream?.config.subjects?.length ? 'Within ' + stream.config.subjects.join(', ') : '';
+    for (const id of ['operation-subject', 'operation-purge-filter', 'operation-filter'])
+      $(id).placeholder = hint;
+  }
+  // With several reachable accounts nothing is preselected, so a stream never lands in
+  // the login's own account by default.
+  const OWN = '@own';
+  function accounts(action) {
+    const field = $('operation-account-field'),
+      select = $('operation-account');
+    const targets = NatsuiAccess.createTargets().filter((t) => t.granted !== false);
+    const own = data?.snapshot?.access?.account || 'Own account';
+    const previous = select.value;
+    const options = targets.map((t) => {
+      const o = element('option', t.account || `${own} (this login's account)`);
+      o.value = t.account || OWN;
+      return o;
+    });
+    if (targets.length > 1) {
+      const choose = element('option', 'Choose an account');
+      choose.value = '';
+      choose.disabled = true;
+      options.unshift(choose);
+    }
+    select.replaceChildren(...options);
+    select.value = options.some((o) => previous && o.value === previous)
+      ? previous
+      : options[0]?.value ?? '';
+    field.hidden = action !== 'create_stream' || !targets.length;
+    select.disabled = field.hidden || !enabled;
+    select.required = targets.length > 1;
   }
   // Suggestions follow this login's grants. Typed names are still sent, and NATS decides.
   function streams(action) {
@@ -81,6 +120,7 @@
     if (q.get('action') === 'publish') $('operation-mode').value = 'jetstream';
   }
   form.addEventListener('input', reset);
+  $('operation-stream').addEventListener('input', hints);
   $('operation-action').onchange = fields;
   $('operation-mode').onchange = fields;
   $('operation-cancel').onclick = reset;
@@ -133,6 +173,8 @@
       });
     try {
       const target = splitStream(p.stream);
+      if (p.action === 'create_stream' && !$('operation-account').disabled)
+        target.account = $('operation-account').value === OWN ? '' : $('operation-account').value;
       preview = await send(
         '/api/operations/preview',
         { ...p, stream: target.name },
@@ -140,15 +182,23 @@
       );
       reviewedAccount = target.account;
       $('operation-warning').textContent = preview.warning;
+      const own = data?.snapshot?.access?.account;
       $('operation-details').textContent = JSON.stringify(
-        preview.record
-          ? { ...preview.proposal, record: preview.record }
-          : preview.proposal,
+        {
+          account: target.account || own || "this login's account",
+          ...preview.proposal,
+          ...(preview.record ? { record: preview.record } : {}),
+        },
         null,
         2,
       );
       $('operation-confirm-name').textContent =
         'Confirmation: ' + preview.confirmation;
+      // Only removals are typed out. Everything else adds or pauses, and the review is enough.
+      const typed = TYPED.includes(p.action);
+      $('operation-confirm-field').hidden = !typed;
+      $('operation-confirm-name').hidden = !typed;
+      if (!typed) $('operation-confirm').value = preview.confirmation;
       review.hidden = false;
       status.textContent = 'Review is valid for 60 seconds.';
     } catch (e) {
@@ -221,6 +271,15 @@
     gate();
     fields();
   }
+  // Grants and reachable accounts arrive with each snapshot. A pending review is kept.
+  globalThis.refreshOperations = () => {
+    if (currentPage() !== 'operations') return;
+    const before = $('operation-action').value;
+    gate();
+    if ($('operation-action').value !== before) fields();
+    else accounts(before);
+    hints();
+  };
   window.addEventListener('hashchange', enter);
   enter();
   fields();

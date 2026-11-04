@@ -28,6 +28,8 @@ const NatsuiAccess = (() => {
   };
   const capabilities = () => data?.snapshot?.capabilities;
   const writes = () => !!data?.dashboard?.writes_enabled;
+  // Accounts whose whole JetStream API this login reaches, null for its own account.
+  const createTargets = () => capabilities()?.create_targets || [];
   function list(stream, consumer) {
     const c = capabilities();
     if (!c) return null;
@@ -42,12 +44,18 @@ const NatsuiAccess = (() => {
     const entry = list(stream, consumer)?.find((x) => x.id === id);
     if (!entry) return null;
     if (entry.write && !writes()) return false;
+    if (entry.imported === false) return false;
     return entry.granted;
   }
   function action(name, stream, consumer) {
     const id = actions[name];
     if (!id) return null;
-    if (name === 'create_stream') return allowed(id);
+    if (name === 'create_stream') {
+      const targets = createTargets();
+      if (!targets.length) return allowed(id);
+      if (!writes()) return false;
+      return targets.some((t) => t.granted === true) ? true : targets.every((t) => t.granted === false) ? false : null;
+    }
     if (!stream) {
       const c = capabilities();
       if (!c) return writes() ? null : false;
@@ -93,6 +101,7 @@ const NatsuiAccess = (() => {
     if (entry.granted === null) return 'Unknown';
     if (!entry.granted) return 'Not granted';
     if (entry.id === 'node_metrics' && entry.reachable === false) return 'Granted, no server answered';
+    if (entry.imported === false) return 'Granted, not shared by the owning account';
     if (entry.write && !writes()) return 'Granted, writes off in natsui';
     return 'Available';
   }
@@ -103,6 +112,7 @@ const NatsuiAccess = (() => {
       host.append(element('code', subject));
     });
     if (entry.id === 'node_metrics' && entry.reachable === false) host.append(element('span', 'System account export and an import into this account', 'secondary'));
+    if (entry.imported === false) host.append(element('span', "An export of this request from the owning account and a matching import here. Shared streams usually export reads and consumer creation only", 'secondary'));
     if (entry.write && !writes()) host.append(element('span', 'NATSUI_ALLOW_WRITES=1 on the dashboard', 'secondary'));
     if (!entry.needs.length) host.append(element('span', 'The stream captures no subjects', 'secondary'));
     return host;
@@ -144,7 +154,7 @@ const NatsuiAccess = (() => {
       parts.push(
         element(
           'p',
-          "How this is checked: at sign-in the dashboard requests $SYS.REQ.USER.INFO, and NATS replies with this login's publish allow and deny lists. Each capability's subjects are matched against those lists with NATS wildcard rules. A denial always wins, and a wildcard requirement needs one grant that covers it. No request is sent to test a grant, except one node metrics request at sign-in to confirm a server answers. The lists are read once per sign-in, so sign in again after changing permissions. NATS still decides every request.",
+          "How this is checked: at sign-in the dashboard requests $SYS.REQ.USER.INFO, and NATS replies with this login's publish allow and deny lists. Each capability's subjects are matched against those lists with NATS wildcard rules. A denial always wins, and a wildcard requirement needs one grant that covers it. No request is sent to test a grant, except one node metrics request at sign-in to confirm a server answers. Grants cannot show what another account shares. On a stream reached only through shared reads, removals and consumer pauses are not offered, because such shares rarely include them. The lists are read once per sign-in, so sign in again after changing permissions. NATS still decides every request.",
         ),
       );
     if (!writes()) parts.push(element('p', 'Write capabilities also need NATSUI_ALLOW_WRITES=1 on this dashboard.'));
@@ -166,6 +176,6 @@ const NatsuiAccess = (() => {
     }
     host.replaceChildren(...parts);
   }
-  return { allowed, action, render, renderActions, catalog };
+  return { allowed, action, render, renderActions, catalog, createTargets };
 })();
 globalThis.NatsuiAccess = NatsuiAccess;

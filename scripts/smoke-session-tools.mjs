@@ -60,9 +60,10 @@ try {
     await page.locator('#operation-stream').fill('JOBS');
     for(const [id,value]of Object.entries(fields))await page.locator('#operation-'+id).fill(value);
     await page.locator('#operation-preview').click();await page.locator('#operation-review').waitFor({state:'visible'});
-    const confirmation=(await page.locator('#operation-confirm-name').textContent()).replace('Confirmation: ','');
-    await page.locator('#operation-confirm').fill(confirmation);await page.locator('#operation-apply').click();
-    await page.waitForFunction(()=>/applied and verified|Stored in/.test(document.getElementById('operation-status').textContent));
+    if(!/^(purge|delete)_/.test(action))assert.equal(await page.locator('#operation-confirm').isHidden(),true,`${action} should not ask for a typed confirmation`);
+    else{const confirmation=(await page.locator('#operation-confirm-name').textContent()).replace('Confirmation: ','');await page.locator('#operation-confirm').fill(confirmation);}
+    await page.locator('#operation-apply').click();
+    await page.waitForFunction(()=>/applied and verified|Stored in|Purged/.test(document.getElementById('operation-status').textContent));
   }
   await operation('create_stream',{subjects:'jobs',max:'100'});
   await operation('create_consumer',{consumer:'worker',filter:'jobs'});
@@ -84,6 +85,7 @@ try {
   assert.match(await page.locator('#page-activity').textContent(),/pause_consumer/);
   await page.locator('#failure-watch-start').click();
   assert.match(await page.locator('#failure-watch-status').textContent(),/in-flight/);
+  await operation('purge_stream');
   await page.setViewportSize({width:390,height:844});
   for(const path of ['streams','consumers','activity']){
     await page.goto(base+'/#'+path);

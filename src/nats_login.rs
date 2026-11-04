@@ -452,6 +452,7 @@ pub async fn dispatch(mut app: App, session: Arc<Session>, request: Request) -> 
             &app.prefix,
             &state.streams,
             &state.consumers,
+            &state.listed,
         ));
     }
     let mut monitoring = if session_monitoring && path == "/api/snapshot" {

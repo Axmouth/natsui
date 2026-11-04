@@ -31,6 +31,10 @@ pub struct Snapshot {
     pub access: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub capabilities: Option<Value>,
+    // Accounts whose full stream listing answered, None for the login's own. Only those
+    // expose their whole JetStream API, so only they are offered for creating streams.
+    #[serde(skip)]
+    pub listed: Vec<Option<String>>,
 }
 impl Snapshot {
     pub fn unavailable(reason: &str, scope: &str) -> Self {
@@ -45,6 +49,7 @@ impl Snapshot {
             scenario: None,
             access: None,
             capabilities: None,
+            listed: Vec::new(),
         }
     }
 }
@@ -176,6 +181,7 @@ pub async fn observe_scoped(
     let deadline = tokio::time::Instant::now() + Duration::from_secs(18);
     let restricted = access.filter(|a| a.restricted());
     let mut issues = Vec::new();
+    let mut listed = false;
     let (mut streams, truncated) = match restricted {
         Some(access) if !access.lists_streams(prefix) => {
             let names = access.named_streams(prefix);
@@ -185,7 +191,10 @@ pub async fn observe_scoped(
             )
         }
         _ => match list(client, format!("{prefix}.STREAM.LIST"), "streams", 300).await {
-            Ok(result) => result,
+            Ok(result) => {
+                listed = true;
+                result
+            }
             // A shared account can export single streams without its stream listing. The
             // identity's grants then name the streams it may inspect.
             Err(e)
@@ -298,6 +307,7 @@ pub async fn observe_scoped(
         scenario: None,
         access,
         capabilities: None,
+        listed: if listed { vec![None] } else { Vec::new() },
     }
 }
 
@@ -336,6 +346,9 @@ pub async fn observe_accounts(
             continue;
         }
         reached = true;
+        if !other.listed.is_empty() {
+            combined.listed.push(Some(account.clone()));
+        }
         for item in other.streams.iter_mut().chain(other.consumers.iter_mut()) {
             item["natsui_account"] = json!(account);
         }
@@ -385,6 +398,7 @@ pub fn demo(scope: &str) -> Snapshot {
         scenario: None,
         access: None,
         capabilities: None,
+        listed: Vec::new(),
     }
 }
 

@@ -275,11 +275,20 @@ pub fn capabilities(
 
 // Streams merged from other accounts carry natsui_account and are evaluated against that
 // account's API prefix. Cluster capabilities describe the profile's own account.
+const MANAGEMENT: [&str; 5] = [
+    "purge",
+    "delete_message",
+    "delete_stream",
+    "pause_consumer",
+    "delete_consumer",
+];
+
 pub fn capabilities_by_account(
     access: Option<&Access>,
     prefix: &str,
     streams: &[Value],
     consumers: &[Value],
+    listed: &[Option<String>],
 ) -> Value {
     let account = |v: &Value| v["natsui_account"].as_str().map(str::to_owned);
     let mut labels: Vec<Option<String>> = streams.iter().map(account).collect();
@@ -301,7 +310,23 @@ pub fn capabilities_by_account(
             .as_deref()
             .map(crate::telemetry::account_prefix)
             .unwrap_or_else(|| prefix.to_owned());
-        let part = capabilities(access, &prefix, &own, &theirs);
+        let mut part = capabilities(access, &prefix, &own, &theirs);
+        // An account reached only through single shared streams exports reads and consumer
+        // creation, not stream management, so grants alone would overstate these actions.
+        if label
+            .as_ref()
+            .is_some_and(|l| !listed.contains(&Some(l.clone())))
+        {
+            for key in ["streams", "consumers"] {
+                for item in part[key].as_array_mut().into_iter().flatten() {
+                    for capability in item["capabilities"].as_array_mut().into_iter().flatten() {
+                        if MANAGEMENT.contains(&capability["id"].as_str().unwrap_or_default()) {
+                            capability["imported"] = json!(false);
+                        }
+                    }
+                }
+            }
+        }
         for key in ["streams", "consumers"] {
             let items = part[key].as_array().cloned().unwrap_or_default();
             if let Some(target) = result[key].as_array_mut() {
@@ -312,6 +337,17 @@ pub fn capabilities_by_account(
             }
         }
     }
+    result["create_targets"] = listed
+        .iter()
+        .map(|label| {
+            let prefix = label
+                .as_deref()
+                .map(crate::telemetry::account_prefix)
+                .unwrap_or_else(|| prefix.to_owned());
+            let create = format!("{prefix}.STREAM.CREATE.*");
+            json!({"account":label,"granted":capability("create_stream", true, vec![create], access)["granted"]})
+        })
+        .collect();
     result
 }
 
@@ -469,6 +505,60 @@ mod tests {
     }
 
     #[test]
+    fn shared_streams_do_not_offer_management_from_broad_grants() {
+        let access = Access::parse(
+            &json!({"data":{"user":"ai","account":"AI","permissions":{"publish":{
+            "allow":["$JS.>"],"deny":["$JS.API.STREAM.DELETE.>"]}}}}),
+        )
+        .unwrap();
+        let streams =
+            [json!({"config":{"name":"cases","subjects":["cases.>"]},"natsui_account":"essapi"})];
+        let shared = capabilities_by_account(Some(&access), "$JS.API", &streams, &[], &[None]);
+        let ids = |caps: &Value| -> Vec<(String, bool)> {
+            caps["streams"][0]["capabilities"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|c| (c["id"].as_str().unwrap().to_owned(), c["imported"] != false))
+                .collect()
+        };
+        let imported: Vec<_> = ids(&shared)
+            .into_iter()
+            .filter(|(_, i)| !i)
+            .map(|(id, _)| id)
+            .collect();
+        assert_eq!(imported, ["purge", "delete_message", "delete_stream"]);
+        let listed = capabilities_by_account(
+            Some(&access),
+            "$JS.API",
+            &streams,
+            &[],
+            &[None, Some("essapi".to_owned())],
+        );
+        assert!(ids(&listed).iter().all(|(_, imported)| *imported));
+    }
+
+    #[test]
+    fn stream_creation_is_offered_per_listed_account() {
+        let access = Access::parse(
+            &json!({"data":{"user":"admin","account":"ADMIN","permissions":{"publish":{
+            "allow":[">"],"deny":["$JS.API.STREAM.CREATE.>","$JS.orca.API.STREAM.CREATE.>"]}}}}),
+        )
+        .unwrap();
+        let listed = [None, Some("essapi".to_owned()), Some("orca".to_owned())];
+        let caps = capabilities_by_account(Some(&access), "$JS.API", &[], &[], &listed);
+        assert_eq!(
+            caps["create_targets"],
+            json!([{"account":null,"granted":false},{"account":"essapi","granted":true},{"account":"orca","granted":false}])
+        );
+        let unknown = capabilities_by_account(None, "$JS.API", &[], &[], &listed[..1]);
+        assert_eq!(
+            unknown["create_targets"],
+            json!([{"account":null,"granted":null}])
+        );
+    }
+
+    #[test]
     fn merged_streams_are_evaluated_against_their_account_prefix() {
         let access = Access::parse(&json!({"data":{"user":"system2","account":"SYSTEM2","permissions":{"publish":{
             "allow":["$JS.API.STREAM.INFO.alerts","$JS.API.STREAM.PURGE.alerts","$JS.system3.API.STREAM.INFO.events","$JS.system3.API.STREAM.MSG.GET.events"]}}}}))
@@ -477,7 +567,7 @@ mod tests {
             json!({"config":{"name":"alerts","subjects":["alerts.>"]}}),
             json!({"config":{"name":"events","subjects":["events.>"]},"natsui_account":"system3"}),
         ];
-        let caps = capabilities_by_account(Some(&access), "$JS.API", &streams, &[]);
+        let caps = capabilities_by_account(Some(&access), "$JS.API", &streams, &[], &[]);
         let find = |stream: &str, id: &str| {
             let entry = caps["streams"]
                 .as_array()
