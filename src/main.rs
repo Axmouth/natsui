@@ -1,6 +1,7 @@
 mod access;
 mod auth;
 mod backlog;
+mod base_path;
 mod buckets;
 mod connection;
 mod deployment;
@@ -143,6 +144,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Ok(origin) = std::env::var("NATSUI_PUBLIC_URL") {
         auth.configure_origin(&origin)?;
     }
+    let base: Arc<str> = base_path::from_origin(auth.origin().as_ref()).into();
     oidc::initialize(&auth)?;
     tokio::spawn(auth.clone().expire_sessions());
     let settings_cache = Arc::new(RwLock::new(db.settings().await?));
@@ -214,6 +216,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tokio::spawn(incidents::collect(app.clone()));
     }
     let router = profiles::router(app, persistent.then_some(dir.as_str())).await?;
+    let router =
+        axum::ServiceExt::<axum::extract::Request>::into_make_service(tower::Layer::layer(
+            &axum::middleware::from_fn_with_state(base, base_path::serve),
+            router,
+        ));
     let listener = tokio::net::TcpListener::bind(address).await?;
     println!(
         "natsui: {}://{address} ({})",

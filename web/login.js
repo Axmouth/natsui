@@ -24,7 +24,7 @@ form.onsubmit = async (event) => {
   button.disabled = true;
   status.textContent = 'Signing in...';
   try {
-    const response = await fetch('/api/auth/login', {
+    const response = await fetch('api/auth/login', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -34,7 +34,7 @@ form.onsubmit = async (event) => {
     });
     key.value = '';
     if (response.ok) {
-      location.replace('/');
+      location.replace('./');
       return;
     }
     status.textContent =
@@ -52,12 +52,12 @@ form.onsubmit = async (event) => {
 
 const ticket = new URLSearchParams(location.hash.slice(1)).get('ticket');
 if (ticket) {
-  history.replaceState(null, '', '/login');
+  history.replaceState(null, '', 'login');
   status.textContent = 'Signing in with the one-time link...';
   form.hidden = true;
   (async () => {
     try {
-      const r = await fetch('/api/auth/exchange', {
+      const r = await fetch('api/auth/exchange', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -66,7 +66,7 @@ if (ticket) {
         body: JSON.stringify({ token: ticket }),
       });
       if (r.ok) {
-        location.replace('/');
+        location.replace('./');
         return;
       }
       status.textContent =
@@ -80,10 +80,10 @@ if (ticket) {
   })();
 }
 
-fetch('/api/auth/oidc').then(response=>response.ok?response.json():null).then(config=>{document.getElementById('oidc-login').hidden=!config?.enabled;}).catch(()=>{});
+fetch('api/auth/oidc').then(response=>response.ok?response.json():null).then(config=>{document.getElementById('oidc-login').hidden=!config?.enabled;}).catch(()=>{});
 
 const natsForm = document.getElementById('nats-login-form');
-fetch('/api/auth/nats')
+fetch('api/auth/nats')
   .then(response => response.ok ? response.json() : null)
   .then(config => {
     if (!config?.enabled || ticket) return;
@@ -147,14 +147,14 @@ natsForm.onsubmit = async event => {
     } else {
       credentials = { username: document.getElementById('nats-username').value, password: password.value };
     }
-    const response = await fetch('/api/auth/nats', {
+    const response = await fetch('api/auth/nats', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Natsui-Request': '1' },
       body: JSON.stringify({ profile, ...credentials }),
     });
     if (response.ok) {
       sessionStorage.setItem('natsui-profile', profile);
-      location.replace('/');
+      location.replace('./');
       return;
     }
     status.textContent = response.status === 429

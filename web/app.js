@@ -21,7 +21,7 @@ function streamId(s){return s.natsui_account?`${s.natsui_account}/${s.config.nam
 function consumerStreamId(c){return c.natsui_account?`${c.natsui_account}/${c.stream_name}`:c.stream_name;}
 function findStream(id){return data.snapshot.streams.find(s=>streamId(s)===id);}
 function routeAccount(path){const m=path.match(/^\/api\/(records|messages|latest|subjects)\/([^/?]+)(.*)$/);if(m){const {account,name}=splitStream(decodeURIComponent(m[2]));if(account)return [`/api/${m[1]}/${encodeURIComponent(name)}${m[3]}`,account];}return [path,''];}
-async function api(path, options){ if(staticDemo)return globalThis.NatsuiDemo.api(path,options);const headers=new Headers(options?.headers);headers.set('X-Natsui-Profile',activeProfile);const [target,account]=routeAccount(path);if(account)headers.set('X-Natsui-Account',account);const response=await fetch(target,{...options,headers}); if(response.status===401){location.replace('/login');throw new Error('Sign-in required');} if(!response.ok)throw new Error((await response.text()).slice(0,250)); return response.status===204?null:response.json(); }
+async function api(path, options){ if(staticDemo)return globalThis.NatsuiDemo.api(path,options);const headers=new Headers(options?.headers);headers.set('X-Natsui-Profile',activeProfile);const [target,account]=routeAccount(path);if(account)headers.set('X-Natsui-Account',account);const response=await fetch(target.replace(/^\//,''),{...options,headers}); if(response.status===401){location.replace('login');throw new Error('Sign-in required');} if(!response.ok)throw new Error((await response.text()).slice(0,250)); return response.status===204?null:response.json(); }
 function navigate(){
  const page=pages[currentPage()]?currentPage():'overview';
  document.querySelectorAll('.page').forEach(e=>e.hidden=e.id!==`page-${page}`);
@@ -330,4 +330,4 @@ function renderResources(){
  }
 }
 
-$('sign-out').onclick=async()=>{try{await api('/api/auth/logout',{method:'POST',headers:{'X-Natsui-Request':'1'}});location.replace('/login');}catch(error){$('freshness').textContent=error.message;}};
+$('sign-out').onclick=async()=>{try{await api('/api/auth/logout',{method:'POST',headers:{'X-Natsui-Request':'1'}});location.replace('login');}catch(error){$('freshness').textContent=error.message;}};

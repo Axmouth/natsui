@@ -58,6 +58,21 @@ The DNS name must resolve to that host and the proxy must obtain a trusted certi
 
 With this proxy recipe, the dashboard's HTTP listener is an internal hop. NATSUI_PUBLIC_URL alone does not enable TLS on that listener. Native HTTPS additionally requires NATSUI_HTTPS_CERT and NATSUI_HTTPS_KEY. Loopback health checks and the authenticated login-ticket CLI endpoint remain available for local administration. Other dashboard HTTP requests require the configured public Host and browser sessions use Secure cookies.
 
+### Under a path
+
+To share a host with other services, add the path to NATSUI_PUBLIC_URL, for example `https://tools.example.com/natsui`. natsui then serves its pages, API, redirects and cookies under that path. The proxy forwards requests unchanged. It must not strip the path or rewrite response bodies. An nginx location:
+
+~~~text
+location /natsui/ {
+    proxy_pass http://127.0.0.1:4321;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_buffering off;
+    proxy_read_timeout 1h;
+}
+~~~
+
+`proxy_pass` has no path after the address on purpose. With one, nginx decodes the request path before forwarding, and names that contain an encoded slash stop working.
 
 ## Optional NATS login
 

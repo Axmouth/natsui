@@ -203,7 +203,7 @@ pub async fn run(args: &[String]) -> i32 {
     let auth=report.validation("dashboard.authentication",auth::Auth::from_env(),"Dashboard authentication settings parsed.","Dashboard authentication configuration could not be loaded.","Correct the login policy or mount NATSUI_AUTH_TOKEN_FILE as a readable file containing the generated 64-character key. Session-only NATS sign-in needs no dashboard key.");
     if let Some(auth) = &auth {
         if let Ok(origin) = std::env::var("NATSUI_PUBLIC_URL") {
-            report.validation("dashboard.https",auth.configure_origin(&origin),"HTTPS public-origin configuration is valid. External routing and browser trust remain untested.","Public-origin configuration is invalid.","Set NATSUI_PUBLIC_URL to an HTTPS origin without a path, query or credentials, and enable dashboard or NATS authentication.");
+            report.validation("dashboard.https",auth.configure_origin(&origin),"HTTPS public-origin configuration is valid. External routing and browser trust remain untested.","Public-origin configuration is invalid.","Set NATSUI_PUBLIC_URL to the browser-facing HTTPS URL, optionally with a path, without query or credentials, and enable dashboard or NATS authentication.");
         } else {
             report.add("dashboard.https","warning","No public HTTPS origin is configured. This does not establish how container ports are exposed.","For shared access, configure native HTTPS or a trusted HTTPS proxy and set NATSUI_PUBLIC_URL to the browser-facing HTTPS origin. For local use, publish only to 127.0.0.1. Browser HTTPS and NATS TLS are separate.");
         }

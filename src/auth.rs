@@ -334,18 +334,23 @@ impl Auth {
             .0
             .as_ref()
             .ok_or("Public HTTPS deployment requires dashboard authentication")?;
-        let url = reqwest::Url::parse(origin).map_err(|_| "Invalid NATSUI_PUBLIC_URL")?;
+        let mut url = reqwest::Url::parse(origin).map_err(|_| "Invalid NATSUI_PUBLIC_URL")?;
         if url.scheme() != "https"
             || url.host_str().is_none()
-            || url.path() != "/"
             || url.query().is_some()
             || url.fragment().is_some()
             || !url.username().is_empty()
             || url.password().is_some()
         {
             return Err(
-                "NATSUI_PUBLIC_URL must be an HTTPS origin without credentials or a path".into(),
+                "NATSUI_PUBLIC_URL must be an HTTPS URL without credentials, query or fragment"
+                    .into(),
             );
+        }
+        // A trailing slash makes relative joins, such as the OIDC callback, stay under the path.
+        if !url.path().ends_with('/') {
+            let path = format!("{}/", url.path());
+            url.set_path(&path);
         }
         *protected
             .origin
@@ -1583,13 +1588,19 @@ mod user_tests {
         for origin in [
             "http://dashboard.example",
             "https://user:secret@dashboard.example",
-            "https://dashboard.example/path",
             "https://dashboard.example?x=1",
+            "https://dashboard.example/#x",
         ] {
             assert!(auth.configure_origin(origin).is_err());
         }
         auth.configure_origin("https://dashboard.example:8443")
             .unwrap();
         assert!(app_cookie(&auth, "test", 60).contains("; Secure"));
+        auth.configure_origin("https://dashboard.example/tools/natsui")
+            .unwrap();
+        assert_eq!(
+            auth.origin().unwrap().as_str(),
+            "https://dashboard.example/tools/natsui/"
+        );
     }
 }

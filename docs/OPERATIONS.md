@@ -86,7 +86,7 @@ The binary is in `target/release`. The optional packaging script produces a plat
 | NATSUI_DOMAIN | Unset | JetStream API domain |
 | NATSUI_MONITOR_URLS | Unset | Comma-separated native monitoring origins, at most 32 |
 | NATSUI_PORT | 4321 | Dashboard HTTP or native HTTPS listener port |
-| NATSUI_PUBLIC_URL | Unset | Exact HTTPS browser origin for authenticated shared access |
+| NATSUI_PUBLIC_URL | Unset | Exact HTTPS browser URL for authenticated shared access. An optional path serves the dashboard under it |
 | NATSUI_HTTPS_CERT / NATSUI_HTTPS_KEY | Unset | Dashboard server certificate and matching unencrypted PEM key, enables native HTTPS |
 | NATSUI_HTTPS_CA | System trust | Private CA for verified local HTTPS health checks and login links |
 | NATSUI_DATA_DIR | data (image: /data) | Persistent SQLite directory; mount the entire directory |

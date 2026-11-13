@@ -470,7 +470,7 @@
       };
       try {
         deadline();
-        const response = await fetch('/api/events', {
+        const response = await fetch('api/events', {
           headers: {
             'X-Natsui-Profile': activeProfile,
           },
@@ -479,7 +479,7 @@
         });
         if (response.status === 403) return;
         if (response.status === 401) {
-          location.replace('/login');
+          location.replace('login');
           return;
         }
         if (
